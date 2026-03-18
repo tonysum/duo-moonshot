@@ -1,0 +1,15 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+reports/*.csv
+reports/*.json
+moonshot/paper/data/
+dist/
+*.egg-info/
+node_modules/
+moonshot/paper/frontend/dist/

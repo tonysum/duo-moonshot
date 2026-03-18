@@ -1,0 +1,156 @@
+@import "tailwindcss";
+@plugin "tailwindcss-animate";
+@custom-variant dark (&:where(.dark, .dark *));
+
+
+@theme {
+  --color-background: hsl(43 23% 93%);
+  --color-foreground: hsl(0 0% 4%);
+  
+  --color-card: hsl(43 23% 93%);
+  --color-card-foreground: hsl(0 0% 4%);
+  
+  --color-popover: hsl(43 23% 93%);
+  --color-popover-foreground: hsl(0 0% 4%);
+  
+  --color-primary: hsl(0 0% 4%);
+  --color-primary-foreground: hsl(43 23% 93%);
+  
+  --color-secondary: hsl(0 0% 90%);
+  --color-secondary-foreground: hsl(0 0% 4%);
+  
+  --color-muted: hsl(40 10% 85%);
+  --color-muted-foreground: hsl(0 0% 40%);
+  
+  --color-accent: hsl(20 90% 45%);
+  --color-accent-foreground: hsl(0 0% 100%);
+  
+  --color-destructive: hsl(0 84% 60%);
+  --color-destructive-foreground: hsl(0 0% 98%);
+  
+  --color-border: hsl(0 0% 4%);
+  --color-input: hsl(0 0% 75%);
+  --color-ring: hsl(0 0% 4%);
+  
+  --radius-lg: 0rem;
+  --radius-md: 0rem;
+  --radius-sm: 0rem;
+  
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --font-pixel: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground font-mono;
+  }
+  /* Dark mode overrides */
+  .dark body,
+  .dark {
+    --color-background: hsl(220 15% 8%);
+    --color-foreground: hsl(0 0% 92%);
+    --color-muted: hsl(220 10% 20%);
+    --color-muted-foreground: hsl(0 0% 60%);
+    --color-border: hsl(220 10% 30%);
+    --color-card: hsl(220 15% 10%);
+  }
+}
+
+/* Neo-Brutalism Utilities */
+@utility brut-border {
+  border-width: 4px;
+  border-color: black;
+}
+
+.dark .brut-border {
+  border-color: hsl(220 10% 35%);
+}
+
+@utility brut-shadow {
+  box-shadow: 4px 4px 0px 0px rgba(0,0,0,1);
+}
+
+.dark .brut-shadow {
+  box-shadow: 4px 4px 0px 0px rgba(255,255,255,0.1);
+}
+
+@utility brut-shadow-hover {
+  &:hover {
+    box-shadow: 2px 2px 0px 0px rgba(0,0,0,1);
+    transform: translate(2px, 2px);
+  }
+}
+
+@utility dot-grid-bg {
+  background-image: radial-gradient(circle, #c4c2b8 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+@utility dark-grid-bg {
+  background-image: radial-gradient(circle, hsl(220 10% 18%) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* Glitch Keyframes */
+@keyframes glitch {
+  0%, 90%, 100% {
+    transform: translate(0);
+    filter: none;
+  }
+  92% {
+    transform: translate(-2px, 1px);
+    filter: hue-rotate(90deg);
+  }
+  94% {
+    transform: translate(2px, -1px);
+    filter: hue-rotate(-90deg);
+  }
+  96% {
+    transform: translate(-1px, -1px);
+    filter: none;
+  }
+  98% {
+    transform: translate(1px, 2px);
+    filter: hue-rotate(45deg);
+  }
+}
+
+@keyframes marquee {
+  0% { transform: translateX(0%); }
+  100% { transform: translateX(-50%); }
+}
+
+@utility animate-glitch {
+  animation: glitch 5s infinite;
+}
+
+@utility animate-marquee {
+  animation: marquee 30s linear infinite;
+}
+
+@utility animate-blink {
+  animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+  nav h1 {
+    font-size: 1.5rem !important;
+  }
+  nav .flex.gap-3 {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  nav button {
+    font-size: 0.7rem;
+    padding: 0.3rem 0.6rem;
+  }
+}
