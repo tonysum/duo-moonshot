@@ -13,3 +13,4 @@ dist/
 *.egg-info/
 node_modules/
 moonshot/paper/frontend/dist/
+logs/
