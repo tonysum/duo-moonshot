@@ -65,32 +65,58 @@ class DailyScanner:
         await self._process_pending_signals(now)
 
         gainers = await self._feed.scan_daily_top_gainers(min_pct_chg=self._config.min_pct_chg, top_n=self._config.top_n)
+
         if not gainers:
-            self._store.log_event("SCAN", "SYSTEM", "No targets found")
+            symbols = await self._feed.get_usdt_symbols()
+            self._store.log_event("SCAN", "SYSTEM",
+                f"No targets found (scanned {len(symbols)} symbols, min_chg={self._config.min_pct_chg}%)")
             return
+
+        # Log all gainers found
+        gainer_str = ", ".join(f"{s}(+{p:.1f}%)" for s, p in gainers)
+        self._store.log_event("SCAN", "SYSTEM", f"Found {len(gainers)} gainer(s): {gainer_str}")
 
         open_positions = [p.symbol for p in self._store.get_open_positions()]
         yesterday = now - timedelta(days=1)
+        skipped = []
+        accepted = []
 
         for symbol, pct_chg in gainers:
-            if symbol in open_positions: continue
+            if symbol in open_positions:
+                skipped.append((symbol, "already_in_position"))
+                self._store.log_event("SCAN", symbol, f"SKIP: already in position (+{pct_chg:.1f}%)")
+                continue
+
             adapter = LiveFeedAdapter(symbol, self._feed)
             await adapter.prefetch(yesterday)
 
-            accepted, reason, delay_days = self._strategy.should_enter(symbol, pct_chg, adapter, yesterday, open_positions)
+            ok, reason, delay_days = self._strategy.should_enter(symbol, pct_chg, adapter, yesterday, open_positions)
 
-            if accepted:
+            if ok:
                 if delay_days > 0:
                     self._store.save_pending_signal(PendingSignal(symbol=symbol, pct_chg=pct_chg, signal_date_str=yesterday.strftime("%Y-%m-%d"), delay_reason=reason))
-                    self._store.log_event("SCAN", symbol, f"DELAY entry: {reason}")
+                    self._store.log_event("SCAN", symbol, f"DELAY entry (+{pct_chg:.1f}%): {reason}")
+                    accepted.append((symbol, f"delayed({reason})"))
                 else:
                     if self._config.enable_supertrend_gate:
                         self._store.save_pending_st_signal(PendingSupertrendSignal(symbol=symbol, pct_chg=pct_chg, entry_reason=reason))
-                        self._store.log_event("SCAN", symbol, f"ST PENDING: {reason}")
+                        self._store.log_event("SCAN", symbol, f"ST PENDING (+{pct_chg:.1f}%): waiting for bearish flip")
+                        accepted.append((symbol, "st_pending"))
                     else:
                         await self._open_position(symbol, pct_chg, reason, adapter)
+                        accepted.append((symbol, "opened"))
             else:
-                self._store.log_event("SCAN", f"SKIP: {reason}", symbol)
+                skipped.append((symbol, reason))
+                self._store.log_event("SCAN", symbol, f"SKIP (+{pct_chg:.1f}%): {reason}")
+
+        # Summary log
+        summary_parts = []
+        if accepted:
+            summary_parts.append(f"accepted: {', '.join(f'{s}({r})' for s, r in accepted)}")
+        if skipped:
+            summary_parts.append(f"filtered: {', '.join(f'{s}({r})' for s, r in skipped)}")
+        self._store.log_event("SCAN", "SYSTEM",
+            f"Scan complete — {len(accepted)} accepted, {len(skipped)} filtered. {'; '.join(summary_parts)}")
 
     async def _process_pending_signals(self, now: datetime):
         pending = self._store.get_pending_signals()
