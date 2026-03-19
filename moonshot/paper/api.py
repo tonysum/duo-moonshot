@@ -53,7 +53,10 @@ async def get_positions():
     if not _runner: return []
     positions = _runner.store.get_open_positions()
     for p in positions:
-        price = await _runner.feed.get_current_price(p.symbol)
+        price = _runner.ws_feed.get_price(p.symbol)
+        if price is None:
+            price_val = await _runner.feed.get_current_price(p.symbol)
+            if price_val: price = price_val
         if price:
             p.current_price = price
             actual_pct = (p.entry_price - price) / p.entry_price

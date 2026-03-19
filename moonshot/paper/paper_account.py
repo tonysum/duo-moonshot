@@ -3,7 +3,6 @@
 
 import logging
 from datetime import datetime, timezone
-from typing import Optional
 
 from moonshot.paper.paper_store import PaperStore, MoonshotPosition
 

@@ -3,7 +3,6 @@
 
 import asyncio
 import logging
-import signal
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 

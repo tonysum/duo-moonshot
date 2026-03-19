@@ -147,7 +147,7 @@ class PaperStore:
     def get_events(self, limit: int = 100) -> list[dict]:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute("SELECT timestamp, event_type, symbol, message FROM events ORDER BY id DESC LIMIT ?", (limit,))
-            return [{"timestamp": r[0], "type": r[1], "symbol": r[2], "message": r[3]} for r in cursor.fetchall()]
+            return [{"timestamp": r[0], "event_type": r[1], "symbol": r[2], "message": r[3]} for r in cursor.fetchall()]
 
     def save_pending_signal(self, sig: PendingSignal):
         pending = self.get_pending_signals()

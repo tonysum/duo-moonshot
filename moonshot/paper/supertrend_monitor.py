@@ -41,7 +41,7 @@ class SupertrendMonitor:
         )
 
         if trend == "bearish":
-            self._store.log_event("SCAN", f"ST ({timeframe}) bearish. Executing.", symbol)
+            self._store.log_event("SCAN", symbol, f"ST ({timeframe}) bearish. Executing.")
             adapter = LiveFeedAdapter(symbol, self._feed)
             await self._scanner._open_position(
                 symbol=symbol, surge_pct=sig.pct_chg,
