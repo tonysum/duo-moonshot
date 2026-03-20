@@ -4,11 +4,13 @@ Subscribes to !markPrice@arr@1s for all symbols.
 Maintains a price cache with timestamps.
 Falls back to REST API if WebSocket price is stale (>30s).
 Tries multiple WS endpoints for connectivity.
+Supports proxy via HTTPS_PROXY / HTTP_PROXY env vars.
 """
 
 import asyncio
 import json
 import logging
+import os
 import time
 import traceback
 from typing import Optional
@@ -25,6 +27,17 @@ WS_URLS = [
 STALE_THRESHOLD = 30  # seconds — fall back to REST if older
 
 
+def _detect_proxy() -> Optional[str]:
+    """Detect proxy from environment variables."""
+    for var in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"):
+        proxy = os.environ.get(var)
+        if proxy:
+            # websockets needs socks5:// or http:// prefix
+            logger.info("PriceFeedWS: Using proxy from %s = %s", var, proxy)
+            return proxy
+    return None
+
+
 class PriceFeedWS:
     """Real-time mark price cache via Binance Futures WebSocket."""
 
@@ -36,6 +49,7 @@ class PriceFeedWS:
         self._connected = False
         self._reconnect_delay = 1.0
         self._url_index = 0
+        self._proxy = _detect_proxy()
 
     # ── Public API ────────────────────────────────────────────────
 
@@ -61,7 +75,7 @@ class PriceFeedWS:
     async def start(self):
         """Start the WebSocket connection loop (runs forever with auto-reconnect)."""
         self._running = True
-        logger.info("PriceFeedWS: Starting...")
+        logger.info("PriceFeedWS: Starting...%s", f" (proxy: {self._proxy})" if self._proxy else "")
         while self._running:
             url = WS_URLS[self._url_index % len(WS_URLS)]
             try:
@@ -95,13 +109,28 @@ class PriceFeedWS:
     async def _connect(self, url: str):
         """Connect and consume the mark price stream."""
         logger.info("PriceFeedWS: Connecting to %s ...", url.split("/ws/")[0])
-        async with websockets.connect(
-            url,
+        connect_kwargs = dict(
             ping_interval=20,
             ping_timeout=10,
             close_timeout=5,
+            open_timeout=15,
             additional_headers={"User-Agent": "Mozilla/5.0"},
-        ) as ws:
+        )
+        # websockets >= 12.0 supports proxy via python-socks
+        if self._proxy:
+            try:
+                from python_socks.async_.asyncio import Proxy
+                proxy = Proxy.from_url(self._proxy)
+                sock = await proxy.connect(dest_host=url.split("/")[2], dest_port=443)
+                connect_kwargs["sock"] = sock
+                logger.info("PriceFeedWS: Proxy tunnel established")
+            except ImportError:
+                logger.warning("PriceFeedWS: python-socks not installed, proxy won't work for WS. "
+                             "Install with: uv add python-socks[asyncio]")
+            except Exception as e:
+                logger.warning("PriceFeedWS: Proxy connection failed: %s", e)
+
+        async with websockets.connect(url, **connect_kwargs) as ws:
             self._ws = ws
             self._connected = True
             self._reconnect_delay = 1.0

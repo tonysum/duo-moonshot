@@ -96,6 +96,53 @@ async def get_pending_st():
     if not _runner: return []
     return [s.model_dump() for s in _runner.store.get_pending_st_signals()]
 
+_top_gainers_cache: dict = {"data": [], "ts": 0}
+
+@app.get("/top_gainers")
+async def get_top_gainers():
+    """Return yesterday's top 10 USDT-M futures gainers (cached 5min)."""
+    import time
+    now = time.time()
+    if _top_gainers_cache["data"] and now - _top_gainers_cache["ts"] < 300:
+        return _top_gainers_cache["data"]
+    if not _runner:
+        return []
+    try:
+        tickers = await _runner.client.get_24hr_tickers()
+        usdt_perps = [
+            t for t in tickers
+            if t.get("symbol", "").endswith("USDT")
+            and float(t.get("priceChangePercent", 0)) > 0
+        ]
+        usdt_perps.sort(key=lambda t: float(t.get("priceChangePercent", 0)), reverse=True)
+        result = [
+            {
+                "symbol": t["symbol"],
+                "pct_chg": round(float(t["priceChangePercent"]), 2),
+                "price": t.get("lastPrice", "0"),
+                "volume": round(float(t.get("quoteVolume", 0)) / 1e8, 2),  # 亿
+            }
+            for t in usdt_perps[:10]
+        ]
+        _top_gainers_cache["data"] = result
+        _top_gainers_cache["ts"] = now
+        return result
+    except Exception as e:
+        logger.warning("top_gainers failed: %s", e)
+        return _top_gainers_cache["data"]
+
+@app.get("/scan_results")
+async def get_scan_results():
+    """Return last daily scan snapshot (yesterday's gainers + filter status)."""
+    if not _runner: return None
+    import json
+    raw = _runner.store.get_state("last_scan")
+    if not raw: return None
+    try:
+        return json.loads(raw)
+    except Exception:
+        return None
+
 @app.get("/prices")
 async def get_prices():
     """Real-time prices for marquee ticker (from WS feed with REST fallback)."""

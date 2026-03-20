@@ -193,6 +193,7 @@ class MoonshotRunner:
                             status="filled", filled_time=entry_t, surge_pct=item['pct_chg'],
                             signal_price=item['signal_price'], entry_reason=item['reason'],
                             entry_account_ratio=entry_ratio,
+                            tp_initial_price=entry_p*(1-cfg.tp_initial),
                         )
                         self._account.open_position_bt8(trade, invest, cfg.leverage)
                         trade._add_position_multiplier = cfg.add_position_multiplier
@@ -561,7 +562,8 @@ class MoonshotRunner:
                 "涨幅",
                 "仓位大小",
                 "杠杆倍数",
-                "止盈价",
+                "止盈价(初始)",
+                "止盈价(实际)",
                 "止损价",
                 "开仓理由",
                 "平仓时间",
@@ -597,6 +599,7 @@ class MoonshotRunner:
                     t.surge_pct,
                     t.position_size,
                     t.leverage,
+                    round(t.tp_initial_price, 8) if t.tp_initial_price else round(t.target_price, 8),
                     round(t.target_price, 8),
                     round(t.stop_loss_price, 8),
                     t.entry_reason or "",

@@ -85,6 +85,10 @@ class BinanceFuturesClient:
         data = await self._request("GET", "/fapi/v1/ticker/price", {"symbol": symbol})
         return TickerPrice.model_validate(data)
 
+    async def get_24hr_tickers(self) -> list[dict]:
+        """Fetch 24hr ticker for ALL symbols (single call)."""
+        return await self._request("GET", "/fapi/v1/ticker/24hr")
+
     async def get_top_long_short_account_ratio(self, symbol: str, period: str, limit: int = 1) -> list[LongShortRatio]:
         data = await self._request("GET", "/futures/data/topLongShortAccountRatio", {"symbol": symbol, "period": period, "limit": limit})
         return [LongShortRatio.model_validate(r) for r in data]

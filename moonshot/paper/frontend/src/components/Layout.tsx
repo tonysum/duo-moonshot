@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { fetchTopGainers, fetchScanResults } from '../api';
 
 export interface LayoutProps {
   children: React.ReactNode;
@@ -8,6 +9,18 @@ export interface LayoutProps {
   wsConnected: boolean;
   darkMode: boolean;
   onToggleDark: () => void;
+}
+
+interface Gainer {
+  symbol: string;
+  pct_chg: number;
+  price: string;
+  volume: number;
+}
+
+interface ScanResult {
+  scan_time: string;
+  gainers: { symbol: string; pct_chg: number; status: string; detail: string }[];
 }
 
 const TICKER_SYMBOLS = [
@@ -20,6 +33,19 @@ const TICKER_SYMBOLS = [
 export const Layout: React.FC<LayoutProps> = ({
   children, activeView, onViewChange, prices, wsConnected, darkMode, onToggleDark
 }) => {
+  const [gainers, setGainers] = useState<Gainer[]>([]);
+  const [scanResult, setScanResult] = useState<ScanResult | null>(null);
+
+  useEffect(() => {
+    const loadGainers = () => fetchTopGainers().then(setGainers).catch(() => {});
+    const loadScan = () => fetchScanResults().then(setScanResult).catch(() => {});
+    loadGainers();
+    loadScan();
+    const t1 = setInterval(loadGainers, 5 * 60 * 1000);
+    const t2 = setInterval(loadScan, 5 * 60 * 1000);
+    return () => { clearInterval(t1); clearInterval(t2); };
+  }, []);
+
   const tickerContent = TICKER_SYMBOLS.map(({ key, label, icon }) => {
     const price = prices[key];
     return `${icon} ${label}: $${price ? price.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '---'}`;
@@ -81,8 +107,50 @@ export const Layout: React.FC<LayoutProps> = ({
         {children}
       </main>
 
-      <footer className="p-6 border-t-4 border-black bg-black text-white font-mono text-sm text-center">
-        &copy; 2026 MOONSHOT PAPER TRADING SYSTEM
+      <footer className="px-6 py-3 border-t-4 border-black bg-black text-white font-mono text-xs">
+        {/* Row 1: Live 24H Gainers */}
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-yellow-400 font-bold text-sm shrink-0">🔥 24H TOP</span>
+          <div className="flex gap-3 overflow-x-auto">
+            {gainers.length === 0 ? (
+              <span className="text-gray-500">Loading...</span>
+            ) : (
+              gainers.map((g, i) => (
+                <div key={g.symbol} className="flex items-center gap-1.5 whitespace-nowrap shrink-0">
+                  <span className="text-gray-500">#{i + 1}</span>
+                  <span className="font-bold">{g.symbol.replace('USDT', '')}</span>
+                  <span className="text-green-400 font-bold">+{g.pct_chg}%</span>
+                  <span className="text-gray-500">${parseFloat(g.price).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</span>
+                  {i < gainers.length - 1 && <span className="text-gray-700 mx-0.5">|</span>}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+        {/* Row 2: Yesterday Scan Results */}
+        <div className="flex items-center gap-2 border-t border-gray-800 pt-2">
+          <span className="text-cyan-400 font-bold text-sm shrink-0">📡 SCAN</span>
+          {scanResult ? (
+            <>
+              <span className="text-gray-600 shrink-0">{scanResult.scan_time.slice(5, 16)}</span>
+              <div className="flex gap-3 overflow-x-auto">
+                {scanResult.gainers.map((g) => (
+                  <div key={g.symbol} className="flex items-center gap-1 whitespace-nowrap shrink-0" title={g.detail}>
+                    <span className="font-bold">{g.symbol.replace('USDT', '')}</span>
+                    <span className="text-green-400">+{g.pct_chg}%</span>
+                    {g.status === 'accepted' ? (
+                      <span className="text-green-400">✓</span>
+                    ) : (
+                      <span className="text-red-400" title={g.detail}>✗ <span className="text-gray-600 text-[10px]">{g.detail}</span></span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <span className="text-gray-500">No scan data</span>
+          )}
+        </div>
       </footer>
     </div>
   );

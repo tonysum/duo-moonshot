@@ -21,7 +21,7 @@ class MoonshotConfig:
     # ── 1. Signal Generation (信号生成) ───────────────────────────────
     top_n: int = 3                        # 每日最多选择涨幅前 N 名
     min_pct_chg: float = 10.0             # 最小涨幅要求 10%
-    min_listed_days: int = 0              # 新币过滤
+    min_listed_days: int = 10              # 新币过滤
     
     enable_main_profit_check: bool = True     # 结合30日均线的“主力获利”检查
     # (涨幅上限%, 30日均价涨幅阈值%)

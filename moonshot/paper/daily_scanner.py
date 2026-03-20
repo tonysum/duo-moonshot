@@ -70,6 +70,11 @@ class DailyScanner:
             symbols = await self._feed.get_usdt_symbols()
             self._store.log_event("SCAN", "SYSTEM",
                 f"No targets found (scanned {len(symbols)} symbols, min_chg={self._config.min_pct_chg}%)")
+            import json
+            self._store.set_state("last_scan", json.dumps({
+                "scan_time": now.isoformat(),
+                "gainers": [],
+            }))
             return
 
         # Log all gainers found
@@ -117,6 +122,21 @@ class DailyScanner:
             summary_parts.append(f"filtered: {', '.join(f'{s}({r})' for s, r in skipped)}")
         self._store.log_event("SCAN", "SYSTEM",
             f"Scan complete — {len(accepted)} accepted, {len(skipped)} filtered. {'; '.join(summary_parts)}")
+
+        # Persist scan snapshot for frontend display
+        import json
+        scan_snapshot = {
+            "scan_time": now.isoformat(),
+            "gainers": [
+                {"symbol": s, "pct_chg": round(p, 2), "status": "accepted",
+                 "detail": next((r for sym, r in accepted if sym == s), "")}
+                if any(sym == s for sym, _ in accepted) else
+                {"symbol": s, "pct_chg": round(p, 2), "status": "filtered",
+                 "detail": next((r for sym, r in skipped if sym == s), "")}
+                for s, p in gainers
+            ],
+        }
+        self._store.set_state("last_scan", json.dumps(scan_snapshot, ensure_ascii=False))
 
     async def _process_pending_signals(self, now: datetime):
         pending = self._store.get_pending_signals()

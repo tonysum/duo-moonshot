@@ -55,6 +55,16 @@ export async function fetchPrices(): Promise<Record<string, number>> {
   return res.json();
 }
 
+export async function fetchTopGainers(): Promise<{symbol: string; pct_chg: number; price: string; volume: number}[]> {
+  const res = await fetch(`${API_BASE}/top_gainers`);
+  return res.json();
+}
+
+export async function fetchScanResults(): Promise<{scan_time: string; gainers: {symbol: string; pct_chg: number; status: string; detail: string}[]} | null> {
+  const res = await fetch(`${API_BASE}/scan_results`);
+  return res.json();
+}
+
 // SSE stream for real-time data
 export function createStream(
   onData: (data: any) => void,

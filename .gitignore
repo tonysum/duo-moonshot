@@ -14,3 +14,4 @@ dist/
 node_modules/
 moonshot/paper/frontend/dist/
 logs/
+visualize.html

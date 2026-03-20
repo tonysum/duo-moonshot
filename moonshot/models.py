@@ -87,6 +87,7 @@ class AmplitudeTrade:
     volume_24h: float = 0.0
     signal_price: Optional[float] = None
     entry_reason: str = ""
+    tp_initial_price: Optional[float] = None  # Initial TP price at entry (before timeout reduction)
     entry_account_ratio: Optional[float] = None
     exit_account_ratio: Optional[float] = None
     account_ratio_change: Optional[float] = None
