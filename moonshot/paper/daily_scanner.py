@@ -21,9 +21,11 @@ class LiveFeedAdapter:
         self.feed = feed
         self._daily_data: dict[str, dict] = {} 
         self._30d_avg_price: float = 0.0
+        self._listing_date: Optional[datetime] = None
 
     async def prefetch(self, signal_date: datetime):
         self._30d_avg_price = await self.feed.load_30d_avg_price(self.symbol) or 0.0
+        self._listing_date = await self.feed.load_listing_date(self.symbol)
         for i in range(3):
             dt = signal_date + timedelta(days=i)
             dstr = dt.strftime("%Y-%m-%d")
@@ -38,6 +40,9 @@ class LiveFeedAdapter:
 
     def load_30d_avg_price(self, symbol: str, dt: Optional[datetime] = None) -> float:
         return self._30d_avg_price
+
+    def load_listing_date(self, symbol: str) -> Optional[datetime]:
+        return self._listing_date
 
     def load_1d_open(self, symbol: str, dt: datetime, *args) -> float:
         return self._get_day(dt).get("open", 0.0)

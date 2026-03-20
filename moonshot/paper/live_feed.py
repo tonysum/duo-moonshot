@@ -84,6 +84,25 @@ class LiveFeed:
             logger.warning("Failed to load 30d avg for %s: %s", symbol, e)
             return None
 
+    _listing_date_cache: dict[str, Optional[datetime]] = {}
+
+    async def load_listing_date(self, symbol: str) -> Optional[datetime]:
+        """Get listing date by querying the earliest 1d kline."""
+        if symbol in self._listing_date_cache:
+            return self._listing_date_cache[symbol]
+        try:
+            klines = await self._client.get_klines(
+                symbol=symbol, interval="1d", limit=1, start_time=0,
+            )
+            if klines:
+                listing = datetime.fromtimestamp(klines[0].open_time / 1000, tz=timezone.utc)
+                self._listing_date_cache[symbol] = listing
+                return listing
+        except Exception as e:
+            logger.warning("Failed to load listing date for %s: %s", symbol, e)
+        self._listing_date_cache[symbol] = None
+        return None
+
     async def load_1d_open(self, symbol: str, date: datetime) -> Optional[float]:
         try:
             day_start_ms = int(date.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc).timestamp() * 1000)
