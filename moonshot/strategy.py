@@ -55,7 +55,7 @@ class MoonshotConfig:
     # Capital & Sizing
     position_size_ratio: float = 0.04      # 总资产 × 4%
     max_positions: int = 7                # 最大同时持仓
-    leverage: int = 1                     # 固定杠杆 1x
+    leverage: int = 2                     # 固定杠杆 1x
     max_hold_days: int = 11               # 超时强制平仓天数
     enable_funding_fee: bool = True       # 开启并计算资金费率成本
 

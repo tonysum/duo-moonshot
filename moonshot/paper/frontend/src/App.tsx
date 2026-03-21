@@ -4,7 +4,7 @@ import { PositionCard } from './components/PositionCard';
 import { ControlPanel } from './components/ControlPanel';
 import { TradesView } from './components/TradesView';
 import { SummaryView } from './components/SummaryView';
-import { createStream, fetchLogs, fetchPendingSt } from './api';
+import { createStream, fetchLogs, fetchPendingSt, fetchTopGainers, fetchScanResults } from './api';
 
 function App() {
   const [currentView, setCurrentView] = useState<'dashboard' | 'trades' | 'summary'>('dashboard');
@@ -14,11 +14,19 @@ function App() {
   const [wsConnected, setWsConnected] = useState(false);
   const [logs, setLogs] = useState<any[]>([]);
   const [pendingSt, setPendingSt] = useState<any[]>([]);
+  const [gainers, setGainers] = useState<any[]>([]);
+  const [scanResult, setScanResult] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('darkMode') === 'true');
   const prevTradeCount = useRef(0);
 
-  // SSE stream for real-time positions + prices + status
+  // Initial fetch for footer data (warms backend cache, immediate display)
+  useEffect(() => {
+    fetchTopGainers().then(setGainers).catch(() => {});
+    fetchScanResults().then(setScanResult).catch(() => {});
+  }, []);
+
+  // SSE stream for real-time positions + prices + status + footer data
   useEffect(() => {
     const es = createStream((data) => {
       if (data.error) return;
@@ -27,6 +35,8 @@ function App() {
       setPrices(data.prices || {});
       setWsConnected(data.ws_connected ?? false);
       setLoading(false);
+      if (Array.isArray(data.top_gainers)) setGainers(data.top_gainers);
+      if (data.scan_results !== undefined) setScanResult(data.scan_results);
 
       // Browser notification on new trade close
       const tc = data.status?.total_trades ?? 0;
@@ -73,6 +83,8 @@ function App() {
       wsConnected={wsConnected}
       darkMode={darkMode}
       onToggleDark={() => setDarkMode(!darkMode)}
+      gainers={gainers}
+      scanResult={scanResult}
     >
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
         <div className="md:col-span-2">

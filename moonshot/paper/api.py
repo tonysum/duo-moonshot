@@ -202,6 +202,10 @@ async def stream_data():
                     pr = _runner.ws_feed.get_price(sym)
                     if pr: ticker[sym] = round(pr, 2)
 
+                # Footer data: top_gainers (cached), scan_results (from store)
+                raw_scan = _runner.store.get_state("last_scan")
+                scan_results = json.loads(raw_scan) if raw_scan else None
+
                 payload = {
                     "status": {
                         "running": _runner._running,
@@ -212,6 +216,8 @@ async def stream_data():
                     "positions": pos_list,
                     "prices": ticker,
                     "ws_connected": _runner.ws_feed.is_connected,
+                    "top_gainers": _top_gainers_cache["data"],
+                    "scan_results": scan_results,
                 }
                 yield f"data: {json.dumps(payload, default=str)}\n\n"
                 await asyncio.sleep(2)
