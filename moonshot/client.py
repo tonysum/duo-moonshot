@@ -76,8 +76,8 @@ class BinanceFuturesClient:
 
     async def get_klines(self, symbol: str, interval: str, limit: int = 100, start_time: int = None, end_time: int = None) -> list[Kline]:
         params = {"symbol": symbol, "interval": interval, "limit": limit}
-        if start_time: params["startTime"] = start_time
-        if end_time: params["endTime"] = end_time
+        if start_time is not None: params["startTime"] = start_time
+        if end_time is not None: params["endTime"] = end_time
         data = await self._request("GET", "/fapi/v1/klines", params)
         return [Kline.from_array(k) for k in data]
 
