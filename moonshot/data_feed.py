@@ -179,19 +179,22 @@ class DataFeed:
         daily_data = defaultdict(list)
         for symbol in symbols:
             try:
-                tbl = f"K1d{symbol}"
+                sym = _validate_symbol(symbol)
+                tbl = f"K1d{sym}"
                 with self._db.conn.cursor() as cur:
-                    cur.execute(sql.SQL("SELECT open_time, close FROM {} WHERE open_time >= %s AND open_time < %s ORDER BY open_time").format(sql.Identifier(tbl)), [start_ms - 86400000, end_ms])
+                    cur.execute(sql.SQL("SELECT open_time, open, close FROM {} WHERE open_time >= %s AND open_time < %s ORDER BY open_time").format(sql.Identifier(tbl)), [start_ms - 86400000, end_ms])
                     rows = cur.fetchall()
-                for i in range(1, len(rows)):
-                    prev, today, ts = float(rows[i-1][1]), float(rows[i][1]), rows[i][0]
-                    if prev > 0:
-                        daily_data[datetime.fromtimestamp(ts/1000, tz=timezone.utc).strftime('%Y-%m-%d')].append((symbol, (today - prev) / prev * 100))
+                for row in rows:
+                    ts, o, c = row[0], float(row[1]), float(row[2])
+                    if o > 0:
+                        # 当日全天涨幅 = (收-开)/开 (原公式误用前日收->今日收)
+                        daily_data[datetime.fromtimestamp(ts/1000, tz=timezone.utc).strftime('%Y-%m-%d')].append((symbol, (c - o) / o * 100))
             except Exception: continue
         res = {}
         for d, items in daily_data.items():
             items.sort(key=lambda x: x[1], reverse=True)
             res[d] = items[:top_n]
+        self._daily_gainers_cache = res
         return res
 
     def load_daily_top_gainers(self, date: datetime, top_n: int = 1) -> list:

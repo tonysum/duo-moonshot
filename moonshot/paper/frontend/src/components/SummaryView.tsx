@@ -1,16 +1,20 @@
 import { useState, useEffect } from 'react';
 import { fetchSummary } from '../api';
 
-export function SummaryView() {
+interface SummaryViewProps {
+  strategy?: 'daily' | 'rolling';
+}
+
+export function SummaryView({ strategy }: SummaryViewProps) {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchSummary()
+    fetchSummary(strategy)
       .then(setData)
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, []);
+  }, [strategy]);
 
   if (loading) return <div className="brut-border p-12 text-center font-black text-2xl animate-blink">Loading Summary...</div>;
   if (!data || data.total_trades === 0) {

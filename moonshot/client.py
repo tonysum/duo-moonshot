@@ -95,7 +95,7 @@ class BinanceFuturesClient:
 
     async def get_funding_rate(self, symbol: str, start_time: int = None, end_time: int = None, limit: int = 100) -> list[FundingRateHistory]:
         params = {"symbol": symbol, "limit": limit}
-        if start_time: params["startTime"] = start_time
-        if end_time: params["endTime"] = end_time
+        if start_time is not None: params["startTime"] = start_time
+        if end_time is not None: params["endTime"] = end_time
         data = await self._request("GET", "/fapi/v1/fundingRate", params)
         return [FundingRateHistory.model_validate(f) for f in data]

@@ -98,14 +98,17 @@ class AmplitudeTrade:
 
     @property
     def is_win(self) -> bool:
-        return self.result in ("success", "tp_initial", "tp_reduced", "tp_after_add")
+        return self.result in (
+            "success", "tp_initial", "tp_reduced", "tp_after_add", "tp_momentum", "tp_ratchet",
+            "trailing_stop", "trailing_take_profit",
+        )
 
     @property
     def is_closed(self) -> bool:
         return self.result in (
             "success", "failed", "timeout",
-            "tp_initial", "tp_reduced", "tp_after_add",
-            "stop_loss", "trailing_stop", "dynamic_ratio_sl",
+            "tp_initial", "tp_reduced", "tp_after_add", "tp_momentum", "tp_ratchet",
+            "stop_loss", "trailing_stop", "trailing_take_profit", "dynamic_ratio_sl",
         )
 
     @property
@@ -176,8 +179,11 @@ class RunResult:
 
 # ── Result helpers ──────────────────────────────────────────────────────────
 
-_TP_RESULTS = frozenset({"success", "tp_initial", "tp_reduced", "tp_after_add"})
-_SL_RESULTS = frozenset({"failed", "stop_loss", "dynamic_ratio_sl", "trailing_stop"})
+_TP_RESULTS = frozenset({
+    "success", "tp_initial", "tp_reduced", "tp_after_add", "tp_momentum", "tp_ratchet",
+    "trailing_stop", "trailing_take_profit",
+})
+_SL_RESULTS = frozenset({"failed", "stop_loss", "dynamic_ratio_sl"})
 
 
 def is_win_result(result: str | None) -> bool:
@@ -195,9 +201,12 @@ def derive_exit_reason(result: str | None) -> str:
         "tp_initial": "止盈(初始目标)",
         "tp_reduced": "止盈(10h降盈)",
         "tp_after_add": "止盈(补仓后)",
+        "tp_momentum": "止盈(阶梯抬高)",
+        "tp_ratchet": "止盈(抬高目标)",
         "failed": "止损",
         "stop_loss": "止损",
-        "trailing_stop": "追踪止损",
+        "trailing_stop": "追踪止盈",
+        "trailing_take_profit": "追踪止盈",
         "dynamic_ratio_sl": "动态止损(多空比)",
         "timeout": "超时平仓",
         "cancelled": "已取消",

@@ -3,6 +3,8 @@
 Usage:
     python backtest_rolling.py --start 2025-01-01 --top_n 3
     python backtest_rolling.py --start 2025-01-01 --end 2025-03-20 --capital 10000 --cooldown 12
+    python backtest_rolling.py --sizing fixed_usd --fixed-invest 400
+    python backtest_rolling.py --sizing equity_pct --size-ratio 0.04   # 总权益×ratio（旧逻辑）
 """
 
 import argparse
@@ -29,8 +31,28 @@ def main():
     parser.add_argument("--scan-interval", type=int, default=1, help="Scan interval hours (default: 1, e.g. 4=every 4h)")
     parser.add_argument("--workers", type=int, default=0, help="Parallel workers for data loading (0=auto)")
     parser.add_argument("--no-csv", action="store_true", help="Skip CSV export")
+    parser.add_argument(
+        "--sizing",
+        choices=["free_cash_pct", "equity_pct", "fixed_usd"],
+        default="free_cash_pct",
+        help="Position sizing: free_cash×ratio | equity×ratio | fixed USD per trade",
+    )
+    parser.add_argument(
+        "--size-ratio",
+        type=float,
+        default=None,
+        help="Override position_size_ratio (default 0.04)",
+    )
+    parser.add_argument(
+        "--fixed-invest",
+        type=float,
+        default=None,
+        help="Fixed margin per trade (USD) when --sizing fixed_usd",
+    )
 
     args = parser.parse_args()
+    if args.sizing == "fixed_usd" and args.fixed_invest is None:
+        parser.error("--fixed-invest is required when --sizing fixed_usd")
 
     start = datetime.strptime(args.start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     end = datetime.strptime(args.end, "%Y-%m-%d").replace(tzinfo=timezone.utc) if args.end else datetime.now(timezone.utc)
@@ -39,7 +61,16 @@ def main():
     db.connect()
     feed = RollingDataFeed(db, workers=args.workers) if args.workers else RollingDataFeed(db)
 
-    cfg = RollingConfig(top_n=args.top_n, signal_cooldown_hours=args.cooldown, rolling_window_hours=args.window, scan_interval_hours=args.scan_interval)
+    ratio = args.size_ratio if args.size_ratio is not None else 0.04
+    cfg = RollingConfig(
+        top_n=args.top_n,
+        signal_cooldown_hours=args.cooldown,
+        rolling_window_hours=args.window,
+        scan_interval_hours=args.scan_interval,
+        position_sizing_mode=args.sizing,
+        position_size_ratio=ratio,
+        fixed_invest_usd=args.fixed_invest,
+    )
     strategy = RollingStrategy(config=cfg)
     account = Account(args.capital)
 
@@ -50,6 +81,10 @@ def main():
     print(f"  Period: {start.date()} to {end.date()}")
     print(f"  Capital: ${args.capital:,.2f}")
     print(f"  Top N: {args.top_n}, Cooldown: {args.cooldown}h, Window: {args.window}h, Scan: every {args.scan_interval}h")
+    if args.sizing == "fixed_usd":
+        print(f"  Sizing: fixed ${args.fixed_invest:,.2f}/trade")
+    else:
+        print(f"  Sizing: {args.sizing}  ratio={ratio}")
     print(f"{'='*50}\n")
 
     result = runner.run(start, end)

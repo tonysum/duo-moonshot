@@ -90,21 +90,23 @@ class PaperAccount:
         pos = next((p for p in positions if p.symbol == symbol), None)
         if not pos: return
         
-        if self.capital < pos.invest_amount:
+        add_margin = pos.position_size * add_price
+        if self.capital < add_margin:
             logger.warning("Insufficient capital for add_position on %s", symbol)
             return
 
-        self.capital -= pos.invest_amount
+        self.capital -= add_margin
         self.store.set_state("capital", str(self.capital))
-        
-        # New avg price
-        total_size = pos.position_size + (pos.invest_amount / add_price)
-        pos.entry_price = (pos.invest_amount * 2) / total_size
+
+        # Align with backtest: add same contract size, new_avg = (entry*orig + add*add_size)/total_size
+        original_size = pos.position_size
+        add_size = original_size
+        total_size = original_size + add_size
+        pos.entry_price = (pos.entry_price * original_size + add_price * add_size) / total_size
         pos.position_size = total_size
-        pos.invest_amount *= 2
+        pos.invest_amount += add_margin
         pos.has_added_position = True
         pos.add_price = add_price
         pos.add_time = add_time
-        
         self.store.save_position(pos)
         self.store.log_event("ADD", symbol, f"Added to {symbol} @ {add_price}, new avg={pos.entry_price:.4f}")

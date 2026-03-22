@@ -5,23 +5,29 @@ export async function fetchStatus() {
   return res.json();
 }
 
-export async function fetchPositions() {
-  const res = await fetch(`${API_BASE}/positions`);
+export async function fetchPositions(strategy?: 'daily' | 'rolling') {
+  const q = strategy ? `?strategy=${strategy}` : '';
+  const res = await fetch(`${API_BASE}/positions${q}`);
   return res.json();
 }
 
-export async function fetchTrades(limit: number = 50) {
-  const res = await fetch(`${API_BASE}/trades?limit=${limit}`);
+export async function fetchTrades(limit: number = 50, strategy?: 'daily' | 'rolling') {
+  const qs = new URLSearchParams({ limit: String(limit) });
+  if (strategy) qs.set('strategy', strategy);
+  const res = await fetch(`${API_BASE}/trades?${qs}`);
   return res.json();
 }
 
-export async function fetchLogs(limit: number = 100) {
-  const res = await fetch(`${API_BASE}/logs?limit=${limit}`);
+export async function fetchLogs(limit: number = 100, strategy?: 'daily' | 'rolling') {
+  const qs = new URLSearchParams({ limit: String(limit) });
+  if (strategy) qs.set('strategy', strategy);
+  const res = await fetch(`${API_BASE}/logs?${qs}`);
   return res.json();
 }
 
-export async function triggerScan() {
-  const res = await fetch(`${API_BASE}/scan`, { method: "POST" });
+export async function triggerScan(strategy?: 'daily' | 'rolling') {
+  const q = strategy ? `?strategy=${strategy}` : '';
+  const res = await fetch(`${API_BASE}/scan${q}`, { method: "POST" });
   return res.json();
 }
 
@@ -40,13 +46,15 @@ export async function openPending(symbol: string) {
   return res.json();
 }
 
-export async function fetchPendingSt() {
-  const res = await fetch(`${API_BASE}/pending_st`);
+export async function fetchPendingSt(strategy?: 'daily' | 'rolling') {
+  const q = strategy ? `?strategy=${strategy}` : '';
+  const res = await fetch(`${API_BASE}/pending_st${q}`);
   return res.json();
 }
 
-export async function fetchSummary() {
-  const res = await fetch(`${API_BASE}/summary`);
+export async function fetchSummary(strategy?: 'daily' | 'rolling') {
+  const q = strategy ? `?strategy=${strategy}` : '';
+  const res = await fetch(`${API_BASE}/summary${q}`);
   return res.json();
 }
 
@@ -60,8 +68,9 @@ export async function fetchTopGainers(): Promise<{symbol: string; pct_chg: numbe
   return res.json();
 }
 
-export async function fetchScanResults(): Promise<{scan_time: string; gainers: {symbol: string; pct_chg: number; status: string; detail: string}[]} | null> {
-  const res = await fetch(`${API_BASE}/scan_results`);
+export async function fetchScanResults(strategy?: 'daily' | 'rolling'): Promise<any> {
+  const q = strategy ? `?strategy=${strategy}` : '';
+  const res = await fetch(`${API_BASE}/scan_results${q}`);
   return res.json();
 }
 

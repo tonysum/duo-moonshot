@@ -113,7 +113,6 @@ class Account:
         trade.position_size = total_size
         trade.invest_amount += add_margin
         trade.has_added_position, trade.add_position_price, trade.add_position_time = True, add_price, add_time
-
         self._running_capital -= add_margin
         self._open_margin += add_margin
         self._record_snapshot(add_time)

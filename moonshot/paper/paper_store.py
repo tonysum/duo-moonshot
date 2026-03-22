@@ -7,11 +7,12 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 logger = logging.getLogger(__name__)
 
 class MoonshotPosition(BaseModel):
+    model_config = ConfigDict(extra="ignore")
     symbol: str
     entry_price: float
     entry_time: str

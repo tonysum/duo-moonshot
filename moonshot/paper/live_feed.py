@@ -6,7 +6,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from moonshot.client import BinanceFuturesClient
 from moonshot.models import Candle
@@ -41,8 +41,13 @@ class LiveFeed:
         self,
         min_pct_chg: float = 10.0,
         top_n: int = 1,
+        diagnostics: Optional[dict[str, Any]] = None,
     ) -> list[tuple[str, float]]:
-        """Scan all symbols for yesterday's top N daily gainers."""
+        """Scan all symbols for yesterday's top N daily gainers.
+
+        If ``diagnostics`` is a dict, it is cleared and filled with scan metadata for logging
+        (best symbol/pct, top preview, counts) when the caller needs to explain empty results.
+        """
         symbols = await self.get_usdt_symbols()
         semaphore = asyncio.Semaphore(20)
         results: list[tuple[str, float]] = []
@@ -55,10 +60,13 @@ class LiveFeed:
                     )
                     if len(klines) < 2:
                         return
-                    prev_close = float(klines[-2].close)
-                    today_close = float(klines[-1].close)
-                    if prev_close > 0:
-                        pct_chg = (today_close - prev_close) / prev_close * 100
+                    # klines[-2] = 昨日已完成的日K, klines[-1] = 今日进行中
+                    # 昨日全天涨幅 = (昨日收 - 昨日开) / 昨日开 (原公式误用今日收-昨日收=隔夜涨跌)
+                    yesterday = klines[-2]
+                    y_open = float(yesterday.open)
+                    y_close = float(yesterday.close)
+                    if y_open > 0:
+                        pct_chg = (y_close - y_open) / y_open * 100
                         results.append((symbol, pct_chg))
                 except Exception:
                     pass
@@ -66,10 +74,45 @@ class LiveFeed:
         await asyncio.gather(*[fetch_one(s) for s in symbols])
 
         if not results:
+            if diagnostics is not None:
+                diagnostics.clear()
+                diagnostics["symbols_total"] = len(symbols)
+                diagnostics["symbols_with_klines"] = 0
+                diagnostics["best_symbol"] = None
+                diagnostics["best_pct"] = None
+                diagnostics["top_preview"] = []
+                diagnostics["count_ge_min"] = 0
             return []
 
         results.sort(key=lambda x: x[1], reverse=True)
+
+        if diagnostics is not None:
+            diagnostics.clear()
+            diagnostics["symbols_total"] = len(symbols)
+            diagnostics["symbols_with_klines"] = len(results)
+            diagnostics["best_symbol"] = results[0][0]
+            diagnostics["best_pct"] = float(results[0][1])
+            diagnostics["top_preview"] = [(s, round(p, 2)) for s, p in results[:5]]
+            diagnostics["count_ge_min"] = sum(1 for _, p in results if p >= min_pct_chg)
+
         return [(s, p) for s, p in results[:top_n] if p >= min_pct_chg]
+
+    async def scan_rolling_top_gainers(
+        self,
+        min_pct_chg: float = 10.0,
+        top_n: int = 3,
+    ) -> list[tuple[str, float]]:
+        """Scan for top N 24h rolling gainers via Binance 24hr ticker (single API call)."""
+        tradeable = set(await self.get_usdt_symbols())
+        tickers = await self._client.get_24hr_tickers()
+        usdt_perps = [
+            (t["symbol"], float(t.get("priceChangePercent", 0)))
+            for t in tickers
+            if t.get("symbol", "") in tradeable
+            and float(t.get("priceChangePercent", 0)) >= min_pct_chg
+        ]
+        usdt_perps.sort(key=lambda x: x[1], reverse=True)
+        return usdt_perps[:top_n]
 
     async def load_30d_avg_price(self, symbol: str) -> Optional[float]:
         try:
@@ -130,15 +173,14 @@ class LiveFeed:
             return None
 
     async def load_24h_volume(self, symbol: str, dt: datetime) -> float:
+        """24h quote volume ending at dt. Aligns with DataFeed: SUM of 1h candles over [dt-24h, dt)."""
         try:
-            day_start_ms = int(dt.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc).timestamp() * 1000)
-            klines = await self._client.get_klines(
-                symbol=symbol, interval="1d",
-                start_time=day_start_ms,
-                end_time=day_start_ms + 86_400_000,
-                limit=1,
-            )
-            return float(klines[0].quote_asset_volume) if klines else -1.0
+            end_ms = int(dt.replace(tzinfo=timezone.utc).timestamp() * 1000)
+            start_ms = end_ms - 86400_000
+            klines = await self._client.get_klines(symbol=symbol, interval="1h", start_time=start_ms, end_time=end_ms, limit=25)
+            if not klines:
+                return -1.0
+            return sum(float(k.quote_asset_volume) for k in klines)
         except Exception:
             return -1.0
 

@@ -11,33 +11,47 @@ interface PositionProps {
   leverage: number;
   tp_price: number;
   sl_price: number;
+  target_pct?: number;
+  stop_loss_pct?: number;
+  entry_reason?: string;
+  add_price?: number | null;
+  add_time?: string | null;
   lowest_price?: number | null;
   has_added_position?: boolean;
   surge_pct?: number;
+  strategy?: string;
+}
+
+function fmtPrice(v: number): string {
+  return v > 100 ? v.toFixed(2) : v.toFixed(5);
+}
+
+function fmtEntryTime(iso: string): string {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString(undefined, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  } catch { return iso.slice(0, 16); }
 }
 
 export const PositionCard: React.FC<PositionProps> = (pos) => {
   const isProfit = pos.profit_pct >= 0;
-  
-  // Hold time calculation
+
   const entryDate = new Date(pos.entry_time);
   const now = new Date();
   const holdMs = now.getTime() - entryDate.getTime();
   const holdHours = Math.floor(holdMs / 3600000);
   const holdMins = Math.floor((holdMs % 3600000) / 60000);
-  const holdStr = holdHours >= 24 
+  const holdStr = holdHours >= 24
     ? `${Math.floor(holdHours / 24)}d ${holdHours % 24}h`
     : `${holdHours}h ${holdMins}m`;
 
-  // Distance to TP/SL (short: TP is below entry, SL is above)
-  const tpDistance = pos.tp_price > 0 
+  const tpDistance = pos.tp_price > 0
     ? ((pos.current_price - pos.tp_price) / pos.current_price * 100).toFixed(1)
     : null;
   const slDistance = pos.sl_price > 0
     ? ((pos.sl_price - pos.current_price) / pos.current_price * 100).toFixed(1)
     : null;
 
-  // Progress bar: how far price has moved toward TP (0% = entry, 100% = TP)
   const range = pos.entry_price - pos.tp_price;
   const moved = pos.entry_price - pos.current_price;
   const progress = range !== 0 ? Math.min(100, Math.max(-50, (moved / range) * 100)) : 0;
@@ -49,17 +63,30 @@ export const PositionCard: React.FC<PositionProps> = (pos) => {
       {/* Header */}
       <div className="flex justify-between items-start">
         <div>
-          <h3 className="text-2xl font-black uppercase">
-            {pos.symbol}
-            {pos.has_added_position && (
-              <span className="ml-2 text-xs bg-blue-200 dark:bg-blue-800 px-1.5 py-0.5 brut-border">2×</span>
+          <div className="flex items-center gap-2">
+            <h3 className="text-2xl font-black uppercase">
+              {pos.symbol}
+              {pos.has_added_position && (
+                <span className="ml-2 text-xs bg-blue-200 dark:bg-blue-800 px-1.5 py-0.5 brut-border">2×</span>
+              )}
+            </h3>
+            {pos.strategy && (
+              <span className={`text-[10px] font-bold px-2 py-0.5 brut-border ${pos.strategy === 'daily' ? 'bg-amber-100 dark:bg-amber-900/50' : 'bg-cyan-100 dark:bg-cyan-900/50'}`}>
+                {pos.strategy}
+              </span>
             )}
-          </h3>
-          <div className="flex gap-3 text-xs font-mono text-muted-foreground mt-1">
-            <span>⏱ {holdStr}</span>
-            <span>{pos.leverage}× SHORT</span>
-            {pos.surge_pct && <span className="text-emerald-600">+{pos.surge_pct.toFixed(0)}%</span>}
           </div>
+          <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs font-mono text-muted-foreground mt-1">
+            <span title="Entry time">{fmtEntryTime(pos.entry_time)}</span>
+            <span>·</span>
+            <span>⏱ {holdStr}</span>
+            <span>·</span>
+            <span>{pos.leverage}× SHORT</span>
+            {pos.surge_pct != null && <span className="text-emerald-600">+{pos.surge_pct.toFixed(0)}%</span>}
+          </div>
+          {pos.entry_reason && (
+            <p className="text-[10px] text-muted-foreground mt-0.5">{pos.entry_reason}</p>
+          )}
         </div>
         <div className={`px-3 py-1 brut-border font-black text-lg ${isProfit ? 'bg-green-400' : 'bg-red-400'}`}>
           {isProfit ? '+' : ''}{pos.profit_pct.toFixed(2)}%
@@ -78,11 +105,23 @@ export const PositionCard: React.FC<PositionProps> = (pos) => {
       <div className="grid grid-cols-2 gap-3 font-mono text-sm">
         <div>
           <p className="text-[10px] uppercase font-bold text-muted-foreground">Entry</p>
-          <p className="font-black">${pos.entry_price.toFixed(pos.entry_price > 100 ? 2 : 5)}</p>
+          <p className="font-black">${fmtPrice(pos.entry_price)}</p>
         </div>
         <div>
           <p className="text-[10px] uppercase font-bold text-muted-foreground">Current</p>
-          <p className="font-black">${pos.current_price.toFixed(pos.current_price > 100 ? 2 : 5)}</p>
+          <p className="font-black">${fmtPrice(pos.current_price)}</p>
+        </div>
+        <div>
+          <p className="text-[10px] uppercase font-bold text-muted-foreground">TP / SL (price)</p>
+          <p className="font-black text-xs">
+            TP ${fmtPrice(pos.tp_price)} / SL ${fmtPrice(pos.sl_price)}
+          </p>
+        </div>
+        <div>
+          <p className="text-[10px] uppercase font-bold text-muted-foreground">TP / SL (%)</p>
+          <p className="font-black text-xs">
+            {pos.target_pct != null ? pos.target_pct : '—'}% / {pos.stop_loss_pct != null ? pos.stop_loss_pct : '—'}%
+          </p>
         </div>
         <div>
           <p className="text-[10px] uppercase font-bold text-muted-foreground">Unrealized PnL</p>
@@ -96,21 +135,27 @@ export const PositionCard: React.FC<PositionProps> = (pos) => {
         </div>
       </div>
 
-      {/* TP/SL Info */}
-      <div className="flex gap-4 text-xs font-mono">
-        {tpDistance && (
+      {/* TP/SL distance + Add info */}
+      <div className="flex flex-wrap gap-2 text-xs font-mono">
+        {tpDistance != null && (
           <span className="bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400 px-2 py-0.5 brut-border">
             TP {tpDistance}% away
           </span>
         )}
-        {slDistance && (
+        {slDistance != null && (
           <span className="bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400 px-2 py-0.5 brut-border">
             SL {slDistance}% away
           </span>
         )}
-        {pos.lowest_price && (
+        {pos.lowest_price != null && (
           <span className="bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 px-2 py-0.5 brut-border">
-            Low: ${pos.lowest_price.toFixed(pos.lowest_price > 100 ? 2 : 5)}
+            Low: ${fmtPrice(pos.lowest_price)}
+          </span>
+        )}
+        {pos.has_added_position && pos.add_price != null && (
+          <span className="bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 px-2 py-0.5 brut-border">
+            Add @ ${fmtPrice(pos.add_price)}
+            {pos.add_time && ` (${fmtEntryTime(pos.add_time)})`}
           </span>
         )}
       </div>

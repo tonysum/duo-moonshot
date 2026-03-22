@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from moonshot.models import AmplitudeTrade
+from moonshot.sizing import PositionSizingMode, compute_order_margin as _compute_order_margin
 from moonshot.data_feed import DataFeed
 
 logger = logging.getLogger(__name__)
@@ -37,32 +38,19 @@ class RollingConfig:
     ])
 
     # ── 2. Entry Filters (门控) ──────────────────────────────────────
-    # Gate A: 多空比延迟 (小时级)
-    enable_top_trader_delay: bool = False
-    top_trader_delay_threshold: float = 0.75
-    top_trader_delay_hours: int = 24          # 延迟小时数 (原版按天, R24按小时)
-    top_trader_data_start: str = '2025-12-11'
-
-    # Gate B: 成交额检查
-    enable_volume_filter: bool = False
-    high_pct_chg_threshold: float = 50.0
-    min_volume_for_high_pct: float = 0.8e8
-    volume_delay_hours: int = 24              # 延迟小时数
-
-    # Gate C: 延迟建仓价格检查 (小时级)
-    max_price_drop_for_delay: float = 11.0    # 跌幅 > 11% → 放弃
-    price_drop_check_window_hours: int = 24   # 检查延迟期间价格跌幅的时间窗口
-
-    # Gate D: Supertrend
+    # Supertrend
     enable_supertrend_gate: bool = False
     st_period: int = 6
     st_multiplier: float = 4.0
     st_timeframe: str = '1h'
 
     # ── 3. Position Management ───────────────────────────────────────
+    # free_cash_pct | equity_pct | fixed_usd（见 MoonshotConfig 注释）
+    position_sizing_mode: PositionSizingMode = "free_cash_pct"
     position_size_ratio: float = 0.04
+    fixed_invest_usd: Optional[float] = None
     max_positions: int = 7
-    leverage: int = 1
+    leverage: int = 2
     max_hold_days: int = 11
     enable_funding_fee: bool = True
 
@@ -144,9 +132,11 @@ class RollingStrategy:
                         continue
 
             if self.config.enable_main_profit_check:
-                avg_price = feed.load_30d_avg_price(symbol, dt)
+                # 与 paper 一致：用「上一自然日」已完成日K 对 30d 均价，避免扫描当日日K未收盘/与 24h ticker 不同步
+                profit_dt = dt - timedelta(days=1)
+                avg_price = feed.load_30d_avg_price(symbol, profit_dt)
                 if avg_price and avg_price > 0:
-                    current_close = feed.load_1d_close(symbol, dt)
+                    current_close = feed.load_1d_close(symbol, profit_dt)
                     if current_close and current_close > 0:
                         from_avg_pct = (current_close - avg_price) / avg_price * 100
                         threshold = self._get_main_profit_threshold(pct_chg)
@@ -172,13 +162,8 @@ class RollingStrategy:
         signal_dt: datetime,
         open_positions: Optional[list] = None,
     ) -> tuple[bool, str, int]:
-        """Check entry gates. Returns (accept, reason, delay_hours).
-
-        Unlike Moonshot which returns delay_days, R24 returns delay_hours.
-        """
+        """Check entry gates. Returns (accept, reason, delay_hours). delay_hours always 0."""
         cfg = self.config
-        delay_hours = 0
-        delay_reasons = []
         self.last_gate_details = {'ratio': None, 'volume_100m': None}
 
         if open_positions and symbol in open_positions:
@@ -190,52 +175,38 @@ class RollingStrategy:
                 return False, "新币过滤", 0
 
         if cfg.enable_main_profit_check:
-            avg_price = feed.load_30d_avg_price(symbol, signal_dt)
+            profit_dt = signal_dt - timedelta(days=1)
+            avg_price = feed.load_30d_avg_price(symbol, profit_dt)
             if avg_price and avg_price > 0:
-                current_close = feed.load_1d_close(symbol, signal_dt)
+                current_close = feed.load_1d_close(symbol, profit_dt)
                 if current_close and current_close > 0:
                     from_avg = (current_close - avg_price) / avg_price * 100
                     threshold = self._get_main_profit_threshold(pct_chg)
                     if from_avg < threshold:
                         return False, "主力未获利", 0
 
-        if cfg.enable_top_trader_delay:
-            data_start = datetime.strptime(cfg.top_trader_data_start, '%Y-%m-%d').replace(tzinfo=timezone.utc)
-            if signal_dt >= data_start:
-                ratio = feed.load_top_trader_ratio(symbol, signal_dt)
-                self.last_gate_details['ratio'] = ratio
-                if ratio is not None and ratio < cfg.top_trader_delay_threshold:
-                    delay_hours = cfg.top_trader_delay_hours
-                    delay_reasons.append("gate2多空比")
-
-        if cfg.enable_volume_filter and pct_chg >= cfg.high_pct_chg_threshold:
-            vol = feed.load_24h_volume(symbol, signal_dt + timedelta(hours=48))
-            if vol >= 0:
-                self.last_gate_details['volume_100m'] = vol / 1e8
-            if 0 <= vol < cfg.min_volume_for_high_pct:
-                delay_hours = cfg.volume_delay_hours
-                delay_reasons.append("gate3成交额")
-
-        # Price drop check during delay period (hourly)
-        if delay_hours > 0 and cfg.max_price_drop_for_delay > 0:
-            check_start = signal_dt
-            check_end = signal_dt + timedelta(hours=delay_hours)
-            candles = feed.load_1h(symbol, check_start, check_end)
-            if len(candles) >= 2:
-                first_price = candles[0].open
-                last_price = candles[-1].close
-                if first_price > 0:
-                    drop_pct = (first_price - last_price) / first_price * 100
-                    if drop_pct > cfg.max_price_drop_for_delay:
-                        return False, "delay_price_drop", 0
-
-        return True, (",".join(delay_reasons) if delay_reasons else "即时建仓"), delay_hours
+        return True, "即时建仓", 0
 
     def _get_main_profit_threshold(self, pct_chg: float) -> float:
         for max_pct, threshold in self.config.main_profit_thresholds:
             if pct_chg < max_pct:
                 return threshold
         return self.config.main_profit_thresholds[-1][1]
+
+    def resolve_tp_threshold(
+        self,
+        trade: AmplitudeTrade,
+        hold_hours: float,
+        session_low: Optional[float] = None,
+    ) -> float:
+        """与 check_exit 固定止盈段一致（供 runner 歧义 K 线检测）；R24 忽略 session_low。"""
+        _ = session_low
+        cfg = self.config
+        if trade.has_added_position:
+            return cfg.tp_after_add
+        if hold_hours >= cfg.tp_hours_threshold:
+            return cfg.tp_reduced
+        return cfg.tp_initial
 
     def check_exit(
         self,
@@ -249,11 +220,10 @@ class RollingStrategy:
         """Check exit conditions — identical to Moonshot."""
         cfg = self.config
         entry_price = trade.entry_price
+        if not entry_price or entry_price <= 0:
+            return None
 
-        tp_threshold = (
-            cfg.tp_after_add if trade.has_added_position else
-            (cfg.tp_reduced if hold_hours >= cfg.tp_hours_threshold else cfg.tp_initial)
-        )
+        tp_threshold = self.resolve_tp_threshold(trade, hold_hours, None)
 
         # Stop loss
         if (candle_high - entry_price) / entry_price >= cfg.sl_threshold:
@@ -272,14 +242,18 @@ class RollingStrategy:
             )
             return res, entry_price * (1 - tp_threshold)
 
-        # Trailing stop
-        if cfg.enable_trailing_stop and trade.lowest_price is not None:
-            if (entry_price - trade.lowest_price) / entry_price >= cfg.trailing_activation_pct:
-                ts_price = trade.lowest_price * (1 + cfg.trailing_distance_pct)
+        # 同根 K 须并入 candle_low 再判追踪，避免漏触发
+        if cfg.enable_trailing_stop:
+            low_for_trail = (
+                min(trade.lowest_price, candle_low)
+                if trade.lowest_price is not None
+                else candle_low
+            )
+            if (entry_price - low_for_trail) / entry_price >= cfg.trailing_activation_pct:
+                ts_price = low_for_trail * (1 + cfg.trailing_distance_pct)
                 if candle_high >= ts_price:
                     return "trailing_stop", ts_price
 
-        # Update lowest
         if trade.lowest_price is None or candle_low < trade.lowest_price:
             trade.lowest_price = candle_low
 
@@ -304,5 +278,13 @@ class RollingStrategy:
             return "dynamic_ratio_sl", current_price
         return None
 
-    def invest_amount(self, total_asset: float) -> float:
-        return total_asset * self.config.position_size_ratio
+    def compute_order_margin(self, free_cash: float, total_equity: float) -> float:
+        """下一笔开仓保证金（USD），不超过 free_cash。"""
+        c = self.config
+        return _compute_order_margin(
+            free_cash=free_cash,
+            total_equity=total_equity,
+            mode=c.position_sizing_mode,
+            position_size_ratio=c.position_size_ratio,
+            fixed_invest_usd=c.fixed_invest_usd,
+        )

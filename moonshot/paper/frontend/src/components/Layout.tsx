@@ -1,5 +1,10 @@
 import React from 'react';
 
+export type ScanSnapshot = {
+  scan_time: string;
+  gainers: { symbol: string; pct_chg: number; status: string; detail: string }[];
+};
+
 export interface LayoutProps {
   children: React.ReactNode;
   activeView: 'dashboard' | 'trades' | 'summary';
@@ -9,7 +14,50 @@ export interface LayoutProps {
   darkMode: boolean;
   onToggleDark: () => void;
   gainers?: { symbol: string; pct_chg: number; price: string; volume: number }[];
-  scanResult?: { scan_time: string; gainers: { symbol: string; pct_chg: number; status: string; detail: string }[] } | null;
+  /** Single-strategy mode: one SCAN row */
+  scanResult?: ScanSnapshot | null;
+  /** Dual mode: Daily + Rolling SCAN rows (omit in single mode) */
+  scanResultsDual?: { daily: ScanSnapshot | null; rolling: ScanSnapshot | null };
+}
+
+function ScanResultStrip({
+  label,
+  labelClassName,
+  data,
+}: {
+  label: string;
+  labelClassName: string;
+  data: ScanSnapshot | null;
+}) {
+  return (
+    <>
+      <span className={`${labelClassName} font-bold text-sm shrink-0`}>{label}</span>
+      {data?.scan_time && Array.isArray(data.gainers) ? (
+        <>
+          <span className="text-gray-600 shrink-0">
+            {data.scan_time.slice(5, 10)} {data.scan_time.slice(11, 16)}
+          </span>
+          <div className="flex gap-3 overflow-x-auto">
+            {data.gainers.map((g) => (
+              <div key={g.symbol} className="flex items-center gap-1 whitespace-nowrap shrink-0" title={g.detail}>
+                <span className="font-bold">{g.symbol.replace('USDT', '')}</span>
+                <span className="text-green-400">+{g.pct_chg}%</span>
+                {g.status === 'accepted' ? (
+                  <span className="text-green-400">✓</span>
+                ) : (
+                  <span className="text-red-400" title={g.detail}>
+                    ✗ <span className="text-gray-600 text-[10px]">{g.detail}</span>
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </>
+      ) : (
+        <span className="text-gray-500">No scan data</span>
+      )}
+    </>
+  );
 }
 
 const TICKER_SYMBOLS = [
@@ -21,7 +69,7 @@ const TICKER_SYMBOLS = [
 
 export const Layout: React.FC<LayoutProps> = ({
   children, activeView, onViewChange, prices, wsConnected, darkMode, onToggleDark,
-  gainers = [], scanResult = null
+  gainers = [], scanResult = null, scanResultsDual,
 }) => {
   const tickerContent = TICKER_SYMBOLS.map(({ key, label, icon }) => {
     const price = prices[key];
@@ -104,32 +152,29 @@ export const Layout: React.FC<LayoutProps> = ({
             )}
           </div>
         </div>
-        {/* Row 2: Yesterday Scan Results */}
-        <div className="flex items-center gap-2 border-t border-gray-800 pt-2">
-          <span className="text-cyan-400 font-bold text-sm shrink-0">📡 SCAN</span>
-          {scanResult?.scan_time && Array.isArray(scanResult.gainers) ? (
-            <>
-              <span className="text-gray-600 shrink-0">
-                {scanResult.scan_time.slice(5, 10)} {scanResult.scan_time.slice(11, 16)}
-              </span>
-              <div className="flex gap-3 overflow-x-auto">
-                {scanResult.gainers.map((g) => (
-                  <div key={g.symbol} className="flex items-center gap-1 whitespace-nowrap shrink-0" title={g.detail}>
-                    <span className="font-bold">{g.symbol.replace('USDT', '')}</span>
-                    <span className="text-green-400">+{g.pct_chg}%</span>
-                    {g.status === 'accepted' ? (
-                      <span className="text-green-400">✓</span>
-                    ) : (
-                      <span className="text-red-400" title={g.detail}>✗ <span className="text-gray-600 text-[10px]">{g.detail}</span></span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </>
-          ) : (
-            <span className="text-gray-500">No scan data</span>
-          )}
-        </div>
+        {/* Scan rows: dual (Daily + Rolling) or single */}
+        {scanResultsDual !== undefined ? (
+          <>
+            <div className="flex items-center gap-2 border-t border-gray-800 pt-2">
+              <ScanResultStrip
+                label="📡 DAILY"
+                labelClassName="text-amber-400"
+                data={scanResultsDual.daily}
+              />
+            </div>
+            <div className="flex items-center gap-2 border-t border-gray-800 pt-2">
+              <ScanResultStrip
+                label="📡 ROLLING"
+                labelClassName="text-cyan-400"
+                data={scanResultsDual.rolling}
+              />
+            </div>
+          </>
+        ) : (
+          <div className="flex items-center gap-2 border-t border-gray-800 pt-2">
+            <ScanResultStrip label="📡 SCAN" labelClassName="text-cyan-400" data={scanResult} />
+          </div>
+        )}
       </footer>
     </div>
   );

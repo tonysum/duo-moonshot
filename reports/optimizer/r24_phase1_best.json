@@ -1,11 +1,11 @@
 {
   "phase": 1,
-  "score": 6703891.8923574705,
+  "score": 34669094.0976348,
   "params": {
     "rolling_window_hours": 42,
-    "scan_interval_hours": 1,
+    "scan_interval_hours": 2,
     "signal_cooldown_hours": 4,
-    "top_n": 4,
-    "min_pct_chg": 20.0
+    "top_n": 5,
+    "min_pct_chg": 22.5
   }
 }

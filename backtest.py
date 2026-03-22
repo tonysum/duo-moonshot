@@ -22,8 +22,18 @@ def main():
     parser.add_argument("--capital", type=float, default=10000.0, help="Initial capital")
     parser.add_argument("--top_n", type=int, default=3, help="Top N gainers to consider")
     parser.add_argument("--no-csv", action="store_true", help="Skip CSV export")
-    
+    parser.add_argument(
+        "--sizing",
+        choices=["free_cash_pct", "equity_pct", "fixed_usd"],
+        default="free_cash_pct",
+        help="Position sizing: free_cash×ratio | equity×ratio | fixed USD per trade",
+    )
+    parser.add_argument("--size-ratio", type=float, default=None, help="Override position_size_ratio (default 0.04)")
+    parser.add_argument("--fixed-invest", type=float, default=None, help="Fixed margin per trade when --sizing fixed_usd")
+
     args = parser.parse_args()
+    if args.sizing == "fixed_usd" and args.fixed_invest is None:
+        parser.error("--fixed-invest is required when --sizing fixed_usd")
     
     start = datetime.strptime(args.start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     end = datetime.strptime(args.end, "%Y-%m-%d").replace(tzinfo=timezone.utc) if args.end else datetime.now(timezone.utc)
@@ -32,7 +42,13 @@ def main():
     db.connect()
     feed = DataFeed(db)
     
-    cfg = MoonshotConfig(top_n=args.top_n)
+    ratio = args.size_ratio if args.size_ratio is not None else 0.04
+    cfg = MoonshotConfig(
+        top_n=args.top_n,
+        position_sizing_mode=args.sizing,
+        position_size_ratio=ratio,
+        fixed_invest_usd=args.fixed_invest,
+    )
     strategy = MoonshotStrategy(config=cfg)
     account = Account(args.capital)
     
@@ -42,6 +58,10 @@ def main():
     print(f"  🌙 Duo-Moonshot Backtest")
     print(f"  Period: {start.date()} to {end.date()}")
     print(f"  Capital: ${args.capital:,.2f}")
+    if args.sizing == "fixed_usd":
+        print(f"  Sizing: fixed ${args.fixed_invest:,.2f}/trade")
+    else:
+        print(f"  Sizing: {args.sizing}  ratio={ratio}")
     print(f"{'='*50}\n")
     
     result = runner.run(start, end)

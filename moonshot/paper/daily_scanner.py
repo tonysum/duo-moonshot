@@ -1,6 +1,7 @@
 """DailyScanner — Core signal scanner for Moonshot paper trading.
 """
 
+import json
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -69,17 +70,58 @@ class DailyScanner:
         self._store.log_event("SCAN", "SYSTEM", "Starting daily scan")
         await self._process_pending_signals(now)
 
-        gainers = await self._feed.scan_daily_top_gainers(min_pct_chg=self._config.min_pct_chg, top_n=self._config.top_n)
+        diag: dict = {}
+        gainers = await self._feed.scan_daily_top_gainers(
+            min_pct_chg=self._config.min_pct_chg,
+            top_n=self._config.top_n,
+            diagnostics=diag,
+        )
 
         if not gainers:
-            symbols = await self._feed.get_usdt_symbols()
-            self._store.log_event("SCAN", "SYSTEM",
-                f"No targets found (scanned {len(symbols)} symbols, min_chg={self._config.min_pct_chg}%)")
-            import json
+            n_ok = diag.get("symbols_with_klines", 0)
+            n_ex = diag.get("symbols_total", 0)
+            best_sym = diag.get("best_symbol")
+            best_pct = diag.get("best_pct")
+            preview = diag.get("top_preview") or []
+            min_c = self._config.min_pct_chg
+            top_n = self._config.top_n
+
+            if n_ok == 0:
+                reason = (
+                    f"无日线候选：在 {n_ex} 个交易对中未取到有效「昨日完整日K」涨幅（接口失败或无返回）。"
+                )
+            elif best_pct is not None and best_pct < min_c:
+                reason = (
+                    f"无日线候选：全市场昨日最高涨幅 {best_sym} +{best_pct:.2f}% ，低于阈值 min_chg={min_c}% "
+                    f"（非「主力未获利」——当前阶段尚未产生候选，门控未执行）。"
+                )
+            else:
+                reason = (
+                    f"无日线候选：配置 top_n={top_n} 或筛选结果异常 "
+                    f"（best {best_sym} +{best_pct:.2f}% ，全市场≥{min_c}% 共 {diag.get('count_ge_min', 0)} 个；请检查 top_n 是否≥1）。"
+                )
+
+            extra = ""
+            if preview:
+                extra = " 涨幅预览 Top5: " + ", ".join(f"{s}+{p:.1f}%" for s, p in preview)
+
+            self._store.log_event("SCAN", "SYSTEM", reason + extra)
+            logger.info("Daily scan: %s%s", reason, extra)
+
             self._store.set_state("last_scan", json.dumps({
                 "scan_time": now.isoformat(),
                 "gainers": [],
-            }))
+                "diagnostics": {
+                    "reason_code": "no_daily_candidates",
+                    "symbols_total": n_ex,
+                    "symbols_with_klines": n_ok,
+                    "best_symbol": best_sym,
+                    "best_pct": round(best_pct, 4) if best_pct is not None else None,
+                    "min_pct_chg": min_c,
+                    "top_n": top_n,
+                    "top_preview": preview,
+                },
+            }, ensure_ascii=False))
             return
 
         # Log all gainers found
@@ -125,11 +167,16 @@ class DailyScanner:
             summary_parts.append(f"accepted: {', '.join(f'{s}({r})' for s, r in accepted)}")
         if skipped:
             summary_parts.append(f"filtered: {', '.join(f'{s}({r})' for s, r in skipped)}")
+        tail = ""
+        if not accepted and skipped:
+            tail = (
+                " 说明：已有昨日涨幅≥阈值的候选，但未开仓；"
+                "常见原因为 主力未获利 / 新币过滤 / 已持仓（见上列各币种 SKIP）。"
+            )
         self._store.log_event("SCAN", "SYSTEM",
-            f"Scan complete — {len(accepted)} accepted, {len(skipped)} filtered. {'; '.join(summary_parts)}")
+            f"Scan complete — {len(accepted)} accepted, {len(skipped)} filtered. {'; '.join(summary_parts)}{tail}")
 
         # Persist scan snapshot for frontend display
-        import json
         scan_snapshot = {
             "scan_time": now.isoformat(),
             "gainers": [
@@ -147,7 +194,9 @@ class DailyScanner:
         pending = self._store.get_pending_signals()
         for sig in pending:
             surge_date = datetime.strptime(sig.signal_date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-            if now < surge_date + timedelta(days=2): continue
+            # delay_days=1: enter at surge_date+1 day (not +2)
+            if now < surge_date + timedelta(days=1):
+                continue
             
             adapter = LiveFeedAdapter(sig.symbol, self._feed)
             await adapter.prefetch(surge_date)
@@ -165,8 +214,12 @@ class DailyScanner:
         current_price = await self._feed.get_current_price(symbol)
         if not current_price: return
 
-        capital = float(self._account.capital)
-        invest = self._strategy.invest_amount(capital)
+        free = float(self._account.capital)
+        locked = sum(p.invest_amount for p in self._store.get_open_positions())
+        total_equity = free + locked
+        invest = self._strategy.compute_order_margin(free, total_equity)
+        if invest <= 0:
+            return
         tp_price = current_price * (1 - self._config.tp_initial)
         sl_price = current_price * (1 + self._config.sl_threshold)
         entry_ratio = await self._feed.load_top_trader_ratio(symbol)
@@ -176,6 +229,6 @@ class DailyScanner:
             invest_amount=float(invest), position_size=float(invest / current_price),
             leverage=self._config.leverage, surge_pct=surge_pct, entry_reason=reason,
             tp_price=tp_price, sl_price=sl_price, target_pct=self._config.tp_initial * 100,
-            stop_loss_pct=self._config.sl_threshold * 100, capital_before=capital, entry_account_ratio=entry_ratio
+            stop_loss_pct=self._config.sl_threshold * 100, capital_before=free, entry_account_ratio=entry_ratio
         )
         self._account.open_position(pos)

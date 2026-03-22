@@ -103,9 +103,8 @@ class RollingRunner:
                                 continue
 
                         # Ambiguous bar detection
-                        tp_threshold = cfg.tp_after_add if trade.has_added_position else (
-                            cfg.tp_reduced if hold_h >= cfg.tp_hours_threshold else cfg.tp_initial
-                        )
+                        _sl = min(c5.low, trade.lowest_price) if trade.lowest_price is not None else c5.low
+                        tp_threshold = self._strategy.resolve_tp_threshold(trade, hold_h, _sl)
                         tp_p = trade.entry_price * (1 - tp_threshold)
                         sl_p = trade.entry_price * (1 + cfg.sl_threshold)
                         if c5.high >= sl_p and c5.low <= tp_p:
@@ -203,8 +202,8 @@ class RollingRunner:
 
                 if entry_p:
                     cap = self._account.capital_at(entry_t)
-                    total_asset = cap + sum(t.invest_amount for t in open_trades)
-                    invest = self._strategy.invest_amount(total_asset)
+                    total_equity = cap + sum(t.invest_amount for t in open_trades)
+                    invest = self._strategy.compute_order_margin(cap, total_equity)
                     if 0 < invest <= cap:
                         entry_ratio = self._feed.load_top_trader_ratio(symbol, entry_t) if cfg.enable_dynamic_ratio_sl else None
                         trade = AmplitudeTrade(
@@ -452,7 +451,10 @@ class RollingRunner:
 
         total_fees_pct = round(self._account.total_fees_pct, 3)
         added_position_count = sum(1 for t in trades if getattr(t, 'has_added_position', False))
-        trailing_stop_count = sum(1 for t in trades if getattr(t, 'result', '') == 'trailing_stop')
+        trailing_stop_count = sum(
+            1 for t in trades
+            if getattr(t, "result", "") in ("trailing_stop", "trailing_take_profit")
+        )
 
         result = RunResult(
             trades=trades,
