@@ -73,8 +73,13 @@ export const TradesView: React.FC<TradesViewProps> = ({ strategy }) => {
           </thead>
           <tbody>
             {trades.map((trade, i) => {
-              const pct = trade.profit_pct ?? (trade.invest_amount && trade.net_pnl != null ? (trade.net_pnl / trade.invest_amount) * 100 : 0);
+              // 勿用 model_dump 里的 profit_pct：那是平仓前最后一跳的「未实现」杠杆%，可能与最终 net_pnl 符号相反
+              const inv = trade.invest_amount;
               const pnl = trade.net_pnl ?? trade.profit_amount ?? 0;
+              const pct =
+                inv != null && inv > 0 && (trade.net_pnl != null || trade.profit_amount != null)
+                  ? (pnl / inv) * 100
+                  : trade.profit_pct ?? 0;
               return (
               <tr key={i} className="border-b-4 border-black hover:bg-gray-50 transition-colors">
                 <td className="p-4 font-black border-r-4 border-black">{trade.symbol}</td>

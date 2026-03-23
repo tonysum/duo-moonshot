@@ -205,6 +205,10 @@ def main():
                 print(f"  Hold:     {hold_str}")
                 if p.lowest_price:
                     print(f"  Low:      ${p.lowest_price:.4f}")
+                hi = getattr(p, "highest_price", None) or p.entry_price
+                if hi and p.sl_price and p.entry_price:
+                    room = (p.sl_price - hi) / hi * 100
+                    print(f"  High:     ${hi:.4f}  (vs SL {room:+.2f}%)")
                 print()
 
     elif args.command == "trades":

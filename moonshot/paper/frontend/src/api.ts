@@ -58,6 +58,31 @@ export async function fetchSummary(strategy?: 'daily' | 'rolling') {
   return res.json();
 }
 
+/** 与回测 moonshot/rolling_runner export_csv 列一致的已平仓 CSV（UTF-8 BOM），表尾可选 Summary 段 */
+export async function downloadPaperTradesCsv(
+  strategy?: 'daily' | 'rolling',
+  includeSummary: boolean = true,
+): Promise<void> {
+  const qs = new URLSearchParams({ include_summary: String(includeSummary) });
+  if (strategy) qs.set('strategy', strategy);
+  const res = await fetch(`${API_BASE}/export/trades.csv?${qs}`);
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error(t || res.statusText);
+  }
+  const blob = await res.blob();
+  const dispo = res.headers.get('Content-Disposition');
+  let fname = `paper_trades_${new Date().toISOString().slice(0, 10)}.csv`;
+  const m = dispo?.match(/filename="?([^";]+)"?/i);
+  if (m) fname = m[1].trim();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fname;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export async function fetchPrices(): Promise<Record<string, number>> {
   const res = await fetch(`${API_BASE}/prices`);
   return res.json();

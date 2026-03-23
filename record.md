@@ -130,3 +130,35 @@
 
 📄 CSV exported: reports/rolling_20260322_105204.csv
 (.venv) (base) ➜  duo-moonshot git:(main) ✗ uv run python backtest_rolling.py --start 2025-11-01 
+
+
+════════════════════════════════════════════════════════════
+  📊 R24 BACKTEST PERFORMANCE SUMMARY
+════════════════════════════════════════════════════════════
+  Net PnL           : $87,142.72 (+871.43%)
+  Initial Capital   : $10,000.00
+  Final Capital     : $97,142.72
+  Max Drawdown      : 7.93%
+  Fees              : -$945.04 (-9.45%)
+────────────────────────────────────────────────────────────
+  Win Rate (Total)  : 91.4% (246W / 23L)
+  Win Rate (Short)  : 90.7%      (Long: N/A)
+────────────────────────────────────────────────────────────
+  Profit Factor     : 4.29       Expected Value: +19.48%/trade
+  Sharpe Ratio      : 0.671      R:R Ratio     : 0.42
+  Avg Win %         : +27.46%      Avg Loss %    : -65.88%
+────────────────────────────────────────────────────────────
+  Signals           : 269        Active Trades : 269
+  Cancelled         : 0          Signal Conv.  : 100.0%
+  Ambiguous Bars    : 0 (conservative SL-first)
+────────────────────────────────────────────────────────────
+  Trades / Month    : 58.02      Cap. Utilization: 258.6%
+  Avg Hold Time     : 32.6h
+  Avg Win Hold      : 31h         Avg Loss Hold : 54h
+────────────────────────────────────────────────────────────
+  Max Consec Loss   : 3 (+0.0%)
+  Add-Positions     : 51         Trailing Stops    : 106
+  Execution Time    : 410.6s
+════════════════════════════════════════════════════════════
+
+📄 CSV exported: reports/rolling_20260322_105954.csv

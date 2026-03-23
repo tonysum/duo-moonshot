@@ -9,11 +9,15 @@ import logging
 from pathlib import Path
 from fastapi import FastAPI, BackgroundTasks, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from datetime import datetime, timezone
+
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
 
 from moonshot.paper.runner import PaperRunner, DualPaperRunner
+from moonshot.paper.trades_csv import build_trades_csv
+from moonshot.rolling_strategy import RollingConfig
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +27,23 @@ _runner: Optional[PaperRunner | DualPaperRunner] = None
 
 def _is_dual_run() -> bool:
     return isinstance(_runner, DualPaperRunner)
+
+
+def _merge_tick_into_price_extremes(d: dict) -> None:
+    """展示用：把 current 并入持仓高低水印（空仓 SL 在上方，看 High 相对 SL 余量）。"""
+    if not d.get("entry_price") or d["entry_price"] <= 0 or not d.get("current_price"):
+        return
+    cp = float(d["current_price"])
+    ep = float(d["entry_price"])
+    hi = d.get("highest_price")
+    hi = float(hi) if hi is not None else ep
+    d["highest_price"] = max(hi, cp)
+    lo = d.get("lowest_price")
+    if lo is None:
+        d["lowest_price"] = min(ep, cp)
+    else:
+        d["lowest_price"] = min(float(lo), cp)
+
 
 app = FastAPI(title="Duo-Moonshot Paper Trading")
 
@@ -87,6 +108,7 @@ async def get_positions(strategy: Optional[str] = Query(None, description="daily
                 p.profit_pct = actual_pct * p.leverage * 100
                 p.unrealized_pnl = p.invest_amount * p.profit_pct / 100
             d = p.model_dump()
+            _merge_tick_into_price_extremes(d)
             if store_key:
                 d["strategy"] = store_key
             out.append(d)
@@ -322,6 +344,7 @@ async def stream_data():
                             p.profit_pct = actual_pct * p.leverage * 100
                             p.unrealized_pnl = p.invest_amount * p.profit_pct / 100
                         d = p.model_dump()
+                        _merge_tick_into_price_extremes(d)
                         out.append(d)
                     return out
 
@@ -427,13 +450,45 @@ async def get_summary(strategy: Optional[str] = Query(None, description="daily|r
     return await _summary_for_store(store, account)
 
 
+def _parse_trade_iso(s: Optional[str]):
+    """解析成交记录里的 ISO 时间；与 trades 条数对齐时须保证每条都有占位，避免 zip 错位。"""
+    if not s:
+        return None
+    from datetime import datetime
+
+    t = str(s).replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(t)
+    except ValueError:
+        return None
+
+
+def _equity_now_fallback(store, account) -> float:
+    """无权益曲线时：现金 + 已占用保证金（未计浮盈，仅作兜底）。"""
+    try:
+        locked = sum(float(p.invest_amount) for p in store.get_open_positions())
+    except Exception:
+        locked = 0.0
+    return float(account.capital) + locked
+
+
 async def _summary_for_store(store, account):
     trades = store.get_trades(limit=9999)
+    equity = store.get_equity_curve()
     if not trades:
+        cur = float(equity[-1]["total_equity"]) if equity else _equity_now_fallback(store, account)
+        ic = 10000.0
+        si = store.get_state("initial_capital")
+        if si:
+            ic = float(si)
+        elif equity:
+            ic = float(equity[0]["total_equity"])
         return {
             "total_trades": 0, "win_rate": 0, "total_pnl": 0,
-            "initial_capital": 10000, "current_capital": float(account.capital),
+            "initial_capital": ic,
+            "current_capital": round(cur, 2),
             "symbols": {},
+            "equity_curve": equity,
         }
 
     wins = [t for t in trades if (t.get("net_pnl") or 0) > 0]
@@ -443,16 +498,15 @@ async def _summary_for_store(store, account):
     total_win = sum(win_amounts)
     total_loss = abs(sum(loss_amounts))
 
-    # Holding hours
-    from datetime import datetime
-    hold_hours = []
+    # 持仓时长：与 trades 等长；解析失败记 0，避免以前「少 append」导致与后续 zip 错位
+    hold_hours: list[float] = []
     for t in trades:
-        try:
-            et = datetime.fromisoformat(t.get("entry_time", ""))
-            xt = datetime.fromisoformat(t.get("exit_time", ""))
+        et = _parse_trade_iso(t.get("entry_time"))
+        xt = _parse_trade_iso(t.get("exit_time"))
+        if et is not None and xt is not None:
             hold_hours.append((xt - et).total_seconds() / 3600)
-        except Exception:
-            pass
+        else:
+            hold_hours.append(0.0)
 
     win_hold = [h for h, t in zip(hold_hours, trades) if (t.get("net_pnl") or 0) > 0]
     loss_hold = [h for h, t in zip(hold_hours, trades) if (t.get("net_pnl") or 0) <= 0]
@@ -481,15 +535,28 @@ async def _summary_for_store(store, account):
         else:
             cur = 0
 
-    # Equity curve from store
-    equity = store.get_equity_curve()
-    initial_cap = 10000.0
+    total_pnl = sum(t.get("net_pnl", 0) for t in trades)
+
     saved_init = store.get_state("initial_capital")
     if saved_init:
         initial_cap = float(saved_init)
+    elif equity:
+        initial_cap = float(equity[0]["total_equity"])
+    else:
+        cash = float(account.capital)
+        locked = 0.0
+        try:
+            locked = sum(float(p.invest_amount) for p in store.get_open_positions())
+        except Exception:
+            pass
+        if locked == 0:
+            initial_cap = cash - total_pnl
+        else:
+            initial_cap = cash + locked
+        if initial_cap <= 0:
+            initial_cap = 10000.0
 
-    current_cap = float(account.capital)
-    total_pnl = sum(t.get("net_pnl", 0) for t in trades)
+    current_cap = float(equity[-1]["total_equity"]) if equity else _equity_now_fallback(store, account)
 
     return {
         "total_trades": len(trades),
@@ -509,6 +576,66 @@ async def _summary_for_store(store, account):
         "symbols": symbols,
         "equity_curve": equity,
     }
+
+
+@app.get("/export/trades.csv")
+async def export_paper_trades_csv(
+    strategy: Optional[str] = Query(None, description="dual 模式必填: daily | rolling"),
+    include_summary: bool = Query(True, description="是否在表尾附加 Summary 段"),
+):
+    """已平仓明细 CSV，列与 `moonshot/runner.py` / `rolling_runner.py` 的 export_csv 一致（UTF-8 BOM）。"""
+    if not _runner:
+        return Response("Runner not initialized", status_code=503, media_type="text/plain")
+
+    if _is_dual_run():
+        if strategy not in ("daily", "rolling"):
+            return Response(
+                "Dual mode: add query ?strategy=daily or ?strategy=rolling",
+                status_code=400,
+                media_type="text/plain",
+            )
+        store = _runner.daily_store if strategy == "daily" else _runner.rolling_store
+        account = _runner.daily_account if strategy == "daily" else _runner.rolling_account
+        variant = "daily" if strategy == "daily" else "rolling"
+        fname_prefix = f"moonshot_paper_{strategy}"
+    else:
+        store, account = _runner.store, _runner.account
+        variant = "rolling" if isinstance(_runner.config, RollingConfig) else "daily"
+        fname_prefix = "moonshot_paper"
+
+    trades = store.get_trades(limit=99999)
+    summary_lines: list[tuple[str, object]] | None = None
+    if include_summary:
+        summ = await _summary_for_store(store, account)
+        summary_lines = [
+            ("total_trades", summ.get("total_trades", "")),
+            ("win_rate_pct", summ.get("win_rate", "")),
+            ("total_pnl", summ.get("total_pnl", "")),
+            ("total_return_pct", summ.get("total_return_pct", "")),
+            ("profit_factor", summ.get("profit_factor", "")),
+            ("initial_capital", summ.get("initial_capital", "")),
+            ("current_capital", summ.get("current_capital", "")),
+            ("avg_hold_hours", summ.get("avg_hold_hours", "")),
+            ("avg_win_hold", summ.get("avg_win_hold", "")),
+            ("avg_loss_hold", summ.get("avg_loss_hold", "")),
+            ("max_consecutive_losses", summ.get("max_consecutive_losses", "")),
+            ("added_positions", summ.get("added_positions", "")),
+        ]
+
+    body = build_trades_csv(
+        trades,
+        variant,
+        include_summary=bool(include_summary and summary_lines),
+        summary_lines=summary_lines,
+    )
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    filename = f"{fname_prefix}_trades_{ts}.csv"
+    return Response(
+        content=body,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
 
 # ── Static file serving (production frontend) ────────────────────
 from fastapi.staticfiles import StaticFiles

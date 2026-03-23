@@ -23,7 +23,10 @@ class PaperAccount:
     def open_position(self, pos: MoonshotPosition):
         if self.capital < pos.invest_amount:
             raise ValueError(f"Insufficient capital: {self.capital} < {pos.invest_amount}")
-        
+        if not self.store.get_state("initial_capital"):
+            # Summary 收益率基准：首笔开仓前权益 = 可用现金 + 本笔将锁定的保证金
+            self.store.set_state("initial_capital", str(self.capital + pos.invest_amount))
+
         self.capital -= pos.invest_amount
         self.store.set_state("capital", str(self.capital))
         self.store.save_position(pos)
@@ -60,6 +63,14 @@ class PaperAccount:
 
         total_fees = commission + funding_fee
         net_pnl = profit_amount - total_fees
+
+        entry_dt = datetime.fromisoformat(pos.entry_time.replace("Z", "+00:00"))
+        exit_dt = datetime.fromisoformat(exit_time.replace("Z", "+00:00"))
+        if entry_dt.tzinfo is None:
+            entry_dt = entry_dt.replace(tzinfo=timezone.utc)
+        if exit_dt.tzinfo is None:
+            exit_dt = exit_dt.replace(tzinfo=timezone.utc)
+        holding_hours = int((exit_dt - entry_dt).total_seconds() / 3600)
         
         self.capital += (pos.invest_amount + net_pnl)
         self.store.set_state("capital", str(self.capital))
@@ -77,6 +88,7 @@ class PaperAccount:
             "funding_count": funding_count,
             "total_fees": round(total_fees, 4),
             "capital_after": round(self.capital, 4),
+            "holding_hours": holding_hours,
         })
         self.store.add_trade(pos.symbol, pos.entry_time, exit_time, trade_data)
         
@@ -108,5 +120,7 @@ class PaperAccount:
         pos.has_added_position = True
         pos.add_price = add_price
         pos.add_time = add_time
+        base_hi = pos.highest_price if pos.highest_price is not None else pos.entry_price
+        pos.highest_price = max(base_hi, add_price, pos.entry_price)
         self.store.save_position(pos)
         self.store.log_event("ADD", symbol, f"Added to {symbol} @ {add_price}, new avg={pos.entry_price:.4f}")

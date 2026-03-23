@@ -26,6 +26,8 @@ class MoonshotPosition(BaseModel):
     target_pct: float
     stop_loss_pct: float
     capital_before: float
+    tp_initial_price: Optional[float] = None  # 开仓时初始止盈价（供 CSV 对齐回测；tp_price 可能被 monitor 更新）
+    signal_price: Optional[float] = None  # 扫描/成交参考价，CSV「信号价格」
     current_price: float = 0.0
     profit_pct: float = 0.0
     unrealized_pnl: float = 0.0
@@ -33,6 +35,7 @@ class MoonshotPosition(BaseModel):
     add_price: Optional[float] = None
     add_time: Optional[str] = None
     lowest_price: Optional[float] = None
+    highest_price: Optional[float] = None  # 持仓以来最高价（空仓：越接近 SL 越危险）
     entry_account_ratio: Optional[float] = None
     exit_account_ratio: Optional[float] = None
     account_ratio_change: Optional[float] = None

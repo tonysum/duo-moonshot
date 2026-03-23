@@ -17,6 +17,7 @@ interface PositionProps {
   add_price?: number | null;
   add_time?: string | null;
   lowest_price?: number | null;
+  highest_price?: number | null;
   has_added_position?: boolean;
   surge_pct?: number;
   strategy?: string;
@@ -51,6 +52,15 @@ export const PositionCard: React.FC<PositionProps> = (pos) => {
   const slDistance = pos.sl_price > 0
     ? ((pos.sl_price - pos.current_price) / pos.current_price * 100).toFixed(1)
     : null;
+
+  const highWater =
+    pos.highest_price != null && pos.highest_price > 0
+      ? Math.max(pos.highest_price, pos.current_price)
+      : Math.max(pos.entry_price, pos.current_price);
+  const slRoomFromHigh =
+    pos.sl_price > 0 && highWater > 0
+      ? ((pos.sl_price - highWater) / highWater * 100).toFixed(2)
+      : null;
 
   const range = pos.entry_price - pos.tp_price;
   const moved = pos.entry_price - pos.current_price;
@@ -122,6 +132,20 @@ export const PositionCard: React.FC<PositionProps> = (pos) => {
           <p className="font-black text-xs">
             {pos.target_pct != null ? pos.target_pct : '—'}% / {pos.stop_loss_pct != null ? pos.stop_loss_pct : '—'}%
           </p>
+        </div>
+        <div>
+          <p className="text-[10px] uppercase font-bold text-muted-foreground">High (since entry)</p>
+          <p className="font-black">${fmtPrice(highWater)}</p>
+          {slRoomFromHigh != null && (
+            <p
+              className={`text-[10px] mt-0.5 ${
+                Number(slRoomFromHigh) <= 0 ? 'text-red-600 font-bold' : 'text-muted-foreground'
+              }`}
+              title="空仓：自持仓以来最高价相对止损价还剩多少上涨空间（%）；≤0 表示峰值已触及或超过止损价"
+            >
+              vs SL: {Number(slRoomFromHigh) > 0 ? '+' : ''}{slRoomFromHigh}%
+            </p>
+          )}
         </div>
         <div>
           <p className="text-[10px] uppercase font-bold text-muted-foreground">Unrealized PnL</p>

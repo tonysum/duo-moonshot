@@ -60,6 +60,12 @@ class PositionMonitor:
         if pos.lowest_price is None or current_price < pos.lowest_price:
             pos.lowest_price = current_price
 
+        # Track highest since entry (short: SL is above — gap vs peak drawup)
+        if pos.highest_price is None:
+            pos.highest_price = max(pos.entry_price, current_price)
+        elif current_price > pos.highest_price:
+            pos.highest_price = current_price
+
         if hold_hours >= self._config.max_hold_days * 24:
             await self._account.close_position(pos, current_price, now_dt.isoformat(), "timeout", feed=self._feed)
             return

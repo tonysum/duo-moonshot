@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { fetchSummary } from '../api';
+import { downloadPaperTradesCsv, fetchSummary } from '../api';
 
 interface SummaryViewProps {
   strategy?: 'daily' | 'rolling';
@@ -8,6 +8,7 @@ interface SummaryViewProps {
 export function SummaryView({ strategy }: SummaryViewProps) {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     fetchSummary(strategy)
@@ -37,10 +38,23 @@ export function SummaryView({ strategy }: SummaryViewProps) {
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-2xl font-black uppercase">📊 Performance Summary</h2>
           <button
-            onClick={() => exportCSV(data)}
-            className="brut-border brut-shadow-hover px-4 py-2 bg-white dark:bg-gray-800 font-bold text-sm uppercase hover:bg-gray-100"
+            type="button"
+            disabled={exporting}
+            onClick={async () => {
+              setExporting(true);
+              try {
+                await downloadPaperTradesCsv(strategy, true);
+              } catch (e) {
+                console.error(e);
+                alert(e instanceof Error ? e.message : 'Export failed');
+              } finally {
+                setExporting(false);
+              }
+            }}
+            className="brut-border brut-shadow-hover px-4 py-2 bg-white dark:bg-gray-800 font-bold text-sm uppercase hover:bg-gray-100 disabled:opacity-50"
+            title="列与回测 moonshot / rolling 的 export_csv 一致，UTF-8 BOM，含表尾 Summary"
           >
-            📥 Export CSV
+            {exporting ? '…' : '📥 Export trades CSV'}
           </button>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -134,30 +148,4 @@ function formatHours(h: number): string {
   if (!h) return '0h';
   if (h >= 24) return `${Math.floor(h / 24)}d ${Math.round(h % 24)}h`;
   return `${h.toFixed(1)}h`;
-}
-
-function exportCSV(data: any) {
-  const symbols = Object.entries(data.symbols || {}) as [string, any][];
-  let csv = 'Symbol,Trades,Wins,Win Rate %,PnL\n';
-  symbols.forEach(([sym, st]) => {
-    csv += `${sym},${st.trades},${st.wins},${st.win_rate},${st.total_pnl}\n`;
-  });
-  csv += `\nSummary\n`;
-  csv += `Total Trades,${data.total_trades}\n`;
-  csv += `Win Rate,${data.win_rate}%\n`;
-  csv += `Net PnL,$${data.total_pnl}\n`;
-  csv += `Return,${data.total_return_pct}%\n`;
-  csv += `Profit Factor,${data.profit_factor}\n`;
-  csv += `Initial Capital,$${data.initial_capital}\n`;
-  csv += `Current Capital,$${data.current_capital}\n`;
-  csv += `Avg Hold Hours,${data.avg_hold_hours}\n`;
-  csv += `Max Consec Loss,${data.max_consecutive_losses}\n`;
-
-  const blob = new Blob([csv], { type: 'text/csv' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `moonshot_summary_${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
 }

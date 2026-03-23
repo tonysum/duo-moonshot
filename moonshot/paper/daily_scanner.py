@@ -229,6 +229,9 @@ class DailyScanner:
             invest_amount=float(invest), position_size=float(invest / current_price),
             leverage=self._config.leverage, surge_pct=surge_pct, entry_reason=reason,
             tp_price=tp_price, sl_price=sl_price, target_pct=self._config.tp_initial * 100,
-            stop_loss_pct=self._config.sl_threshold * 100, capital_before=free, entry_account_ratio=entry_ratio
+            stop_loss_pct=self._config.sl_threshold * 100, capital_before=free, entry_account_ratio=entry_ratio,
+            highest_price=current_price,
+            tp_initial_price=tp_price,
+            signal_price=current_price,
         )
         self._account.open_position(pos)
