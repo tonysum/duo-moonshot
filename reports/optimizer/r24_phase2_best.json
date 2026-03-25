@@ -1,0 +1,16 @@
+{
+  "phase": 2,
+  "score": 156710101.61577463,
+  "params": {
+    "tp_initial": 0.26,
+    "sl_threshold": 0.46,
+    "tp_reduced": 0.08,
+    "tp_hours_threshold": 6,
+    "trailing_activation_pct": 0.1,
+    "trailing_distance_pct": 0.04,
+    "add_position_threshold": 0.22,
+    "tp_after_add": 0.4,
+    "position_sizing_mode": "free_cash_pct",
+    "fixed_invest_usd": null
+  }
+}

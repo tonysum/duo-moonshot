@@ -16,3 +16,4 @@ moonshot/paper/frontend/dist/
 logs/
 visualize.html
 *.db
+bak/

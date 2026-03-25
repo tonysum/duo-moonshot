@@ -23,12 +23,12 @@ class RollingConfig:
     """Strategy configuration for Moonshot-R24 (24h rolling)."""
 
     # ── 1. Signal Generation ─────────────────────────────────────────
-    top_n: int = 3                        # 每次扫描取涨幅前 N 名
-    min_pct_chg: float = 10.0             # 最小涨幅要求 10%
+    top_n: int = 5                        # 每次扫描取涨幅前 N 名
+    min_pct_chg: float = 5.0             # 最小涨幅要求 5%
     min_listed_days: int = 10             # 新币过滤
-    signal_cooldown_hours: int = 24       # 同币种信号冷却期(小时), 可调
-    rolling_window_hours: int = 24        # 滚动窗口大小(小时), 可调
-    scan_interval_hours: int = 1          # 扫描间隔(小时), 1=每小时, 4=每4小时
+    signal_cooldown_hours: int = 8       # 同币种信号冷却期(小时), 可调
+    rolling_window_hours: int = 42        # 滚动窗口大小(小时), 可调
+    scan_interval_hours: int = 2          # 扫描间隔(小时), 1=每小时, 4=每4小时
 
     enable_main_profit_check: bool = True     # 主力获利检查
     main_profit_thresholds: list = field(default_factory=lambda: [
@@ -47,26 +47,26 @@ class RollingConfig:
     # ── 3. Position Management ───────────────────────────────────────
     # free_cash_pct | equity_pct | fixed_usd（见 MoonshotConfig 注释）
     position_sizing_mode: PositionSizingMode = "free_cash_pct"
-    position_size_ratio: float = 0.04
+    position_size_ratio: float = 0.08
     fixed_invest_usd: Optional[float] = None
-    max_positions: int = 7
-    leverage: int = 2
-    max_hold_days: int = 11
+    max_positions: int = 8
+    leverage: int = 3
+    max_hold_days: int = 7
     enable_funding_fee: bool = True
 
     # Take Profit
-    tp_initial: float = 0.34
-    tp_reduced: float = 0.14
-    tp_hours_threshold: int = 10
+    tp_initial: float = 0.16
+    tp_reduced: float = 0.08
+    tp_hours_threshold: int = 6
     tp_after_add: float = 0.45
 
     # Stop Loss
-    sl_threshold: float = 0.44
+    sl_threshold: float = 0.42
 
     # Trailing Stop
     enable_trailing_stop: bool = True
-    trailing_activation_pct: float = 0.16
-    trailing_distance_pct: float = 0.09
+    trailing_activation_pct: float = 0.08
+    trailing_distance_pct: float = 0.04
 
     # Dynamic Ratio SL
     enable_dynamic_ratio_sl: bool = False
@@ -75,7 +75,7 @@ class RollingConfig:
 
     # Add Position
     enable_add_position: bool = True
-    add_position_threshold: float = 0.36
+    add_position_threshold: float = 0.2
     add_position_multiplier: float = 1.0
 
 
