@@ -117,8 +117,8 @@ function App() {
       scanResult={showDualScanFooter ? undefined : scanResult}
       scanResultsDual={scanResultsDual}
     >
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-        <div className="md:col-span-2">
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-6 md:gap-8">
+        <div className="md:col-span-9">
           {currentView === 'dashboard' ? (
             <div className="space-y-8">
               <section className="brut-border brut-shadow bg-white dark:bg-gray-900 p-8">
@@ -167,7 +167,7 @@ function App() {
                     No active positions found.
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4 sm:gap-6">
                     {displayPositions.map((p: any) => (
                       <PositionCard key={`${p.strategy || 's'}-${p.symbol}`} {...p} />
                     ))}
@@ -216,7 +216,7 @@ function App() {
         </div>
 
         {/* Sidebar */}
-        <div className="space-y-8">
+        <div className="md:col-span-3 space-y-8">
           <ControlPanel isRunning={displayStatus?.running} onRefresh={() => {}} isDual={mode === 'dual'} activeStrategy={activeStrategy} onStrategyChange={setActiveStrategy} />
 
           <div className="brut-border brut-shadow bg-white dark:bg-gray-900 p-6">

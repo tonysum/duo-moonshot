@@ -128,7 +128,7 @@ export const Layout: React.FC<LayoutProps> = ({
         </div>
       </nav>
 
-      <main className="p-6 max-w-7xl mx-auto flex-grow w-full">
+      <main className="w-full max-w-[1920px] mx-auto flex-grow py-6 px-4 sm:px-6 lg:px-8">
         {children}
       </main>
 

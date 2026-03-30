@@ -134,20 +134,6 @@ export const PositionCard: React.FC<PositionProps> = (pos) => {
           </p>
         </div>
         <div>
-          <p className="text-[10px] uppercase font-bold text-muted-foreground">High (since entry)</p>
-          <p className="font-black">${fmtPrice(highWater)}</p>
-          {slRoomFromHigh != null && (
-            <p
-              className={`text-[10px] mt-0.5 ${
-                Number(slRoomFromHigh) <= 0 ? 'text-red-600 font-bold' : 'text-muted-foreground'
-              }`}
-              title="空仓：自持仓以来最高价相对止损价还剩多少上涨空间（%）；≤0 表示峰值已触及或超过止损价"
-            >
-              vs SL: {Number(slRoomFromHigh) > 0 ? '+' : ''}{slRoomFromHigh}%
-            </p>
-          )}
-        </div>
-        <div>
           <p className="text-[10px] uppercase font-bold text-muted-foreground">Unrealized PnL</p>
           <p className={`font-black ${isProfit ? 'text-green-600' : 'text-red-600'}`}>
             {isProfit ? '+' : ''}${pos.unrealized_pnl.toFixed(2)}
@@ -160,28 +146,45 @@ export const PositionCard: React.FC<PositionProps> = (pos) => {
       </div>
 
       {/* TP/SL distance + Add info */}
-      <div className="flex flex-wrap gap-2 text-xs font-mono">
-        {tpDistance != null && (
-          <span className="bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400 px-2 py-0.5 brut-border">
-            TP {tpDistance}% away
+      <div className="flex flex-col gap-2 text-xs font-mono">
+        <div className="flex flex-wrap gap-2">
+          {tpDistance != null && (
+            <span className="bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400 px-2 py-0.5 brut-border">
+              TP {tpDistance}% away
+            </span>
+          )}
+          {slDistance != null && (
+            <span className="bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400 px-2 py-0.5 brut-border">
+              SL {slDistance}% away
+            </span>
+          )}
+          {pos.has_added_position && pos.add_price != null && (
+            <span className="bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 px-2 py-0.5 brut-border">
+              Add @ ${fmtPrice(pos.add_price)}
+              {pos.add_time && ` (${fmtEntryTime(pos.add_time)})`}
+            </span>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-2 items-center">
+          {pos.lowest_price != null && (
+            <span className="bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 px-2 py-0.5 brut-border">
+              Low: ${fmtPrice(pos.lowest_price)}
+            </span>
+          )}
+          <span
+            className="bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 px-2 py-0.5 brut-border"
+            title="空仓：持仓以来最高价 vs 止损价余量（%）；≤0 表示峰值已触及或超过止损价"
+          >
+            High: ${fmtPrice(highWater)}
+            {slRoomFromHigh != null && (
+              <span className={Number(slRoomFromHigh) <= 0 ? ' font-bold' : ''}>
+                {' '}
+                · vs SL: {Number(slRoomFromHigh) > 0 ? '+' : ''}
+                {slRoomFromHigh}%
+              </span>
+            )}
           </span>
-        )}
-        {slDistance != null && (
-          <span className="bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400 px-2 py-0.5 brut-border">
-            SL {slDistance}% away
-          </span>
-        )}
-        {pos.lowest_price != null && (
-          <span className="bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 px-2 py-0.5 brut-border">
-            Low: ${fmtPrice(pos.lowest_price)}
-          </span>
-        )}
-        {pos.has_added_position && pos.add_price != null && (
-          <span className="bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 px-2 py-0.5 brut-border">
-            Add @ ${fmtPrice(pos.add_price)}
-            {pos.add_time && ` (${fmtEntryTime(pos.add_time)})`}
-          </span>
-        )}
+        </div>
       </div>
     </div>
   );
