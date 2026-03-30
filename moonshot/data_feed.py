@@ -7,8 +7,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
 from psycopg2 import sql
 
@@ -53,7 +52,7 @@ class DataFeed:
                 rows = cur.fetchall()
             return [
                 Candle(
-                    open_time=datetime.fromtimestamp(r[0] / 1000, tz=timezone.utc),
+                    open_time=datetime.fromtimestamp(r[0] / 1000, tz=UTC),
                     open=float(r[1]), high=float(r[2]), low=float(r[3]), close=float(r[4]),
                     volume=float(r[5]) if r[5] is not None else 0.0,
                 )
@@ -79,7 +78,7 @@ class DataFeed:
                 rows = cur.fetchall()
             res = [
                 Candle(
-                    open_time=datetime.fromtimestamp(r[0] / 1000, tz=timezone.utc),
+                    open_time=datetime.fromtimestamp(r[0] / 1000, tz=UTC),
                     open=float(r[1]), high=float(r[2]), low=float(r[3]), close=float(r[4]),
                     volume=float(r[5]) if r[5] is not None else 0.0,
                 )
@@ -107,7 +106,7 @@ class DataFeed:
                 rows = cur.fetchall()
             res = [
                 Candle(
-                    open_time=datetime.fromtimestamp(r[0] / 1000, tz=timezone.utc),
+                    open_time=datetime.fromtimestamp(r[0] / 1000, tz=UTC),
                     open=float(r[1]), high=float(r[2]), low=float(r[3]), close=float(r[4]),
                 )
                 for r in rows
@@ -134,7 +133,7 @@ class DataFeed:
                 rows = cur.fetchall()
             res = [
                 Candle(
-                    open_time=datetime.fromtimestamp(r[0] / 1000, tz=timezone.utc),
+                    open_time=datetime.fromtimestamp(r[0] / 1000, tz=UTC),
                     open=float(r[1]), high=float(r[2]), low=float(r[3]), close=float(r[4]),
                 )
                 for r in rows
@@ -145,7 +144,7 @@ class DataFeed:
             logger.warning("Failed to load 5m candles for %s: %s", symbol, e)
             return []
 
-    def load_listing_date(self, symbol: str) -> Optional[datetime]:
+    def load_listing_date(self, symbol: str) -> datetime | None:
         if symbol in self._cache_listing_date: return self._cache_listing_date[symbol]
         sym = _validate_symbol(symbol)
         query = sql.SQL("SELECT MIN(open_time) FROM {}").format(sql.Identifier(f"K1d{sym}"))
@@ -154,7 +153,7 @@ class DataFeed:
                 cur.execute(query)
                 row = cur.fetchone()
             if row and row[0] is not None:
-                dt = datetime.fromtimestamp(row[0] / 1000, tz=timezone.utc)
+                dt = datetime.fromtimestamp(row[0] / 1000, tz=UTC)
                 self._cache_listing_date[symbol] = dt
                 return dt
         except Exception: pass
@@ -188,7 +187,7 @@ class DataFeed:
                     ts, o, c = row[0], float(row[1]), float(row[2])
                     if o > 0:
                         # 当日全天涨幅 = (收-开)/开 (原公式误用前日收->今日收)
-                        daily_data[datetime.fromtimestamp(ts/1000, tz=timezone.utc).strftime('%Y-%m-%d')].append((symbol, (c - o) / o * 100))
+                        daily_data[datetime.fromtimestamp(ts/1000, tz=UTC).strftime('%Y-%m-%d')].append((symbol, (c - o) / o * 100))
             except Exception: continue
         res = {}
         for d, items in daily_data.items():
@@ -213,7 +212,7 @@ class DataFeed:
             return float(row[0]) if row and row[0] is not None else -1.0
         except Exception: return -1.0
 
-    def load_1d_open(self, symbol: str, date: datetime) -> Optional[float]:
+    def load_1d_open(self, symbol: str, date: datetime) -> float | None:
         sym = _validate_symbol(symbol)
         day_ms = int(date.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() * 1000)
         try:
@@ -229,10 +228,10 @@ class DataFeed:
             with self._db.conn.cursor() as cur:
                 cur.execute("SELECT funding_time, funding_rate FROM funding_rates WHERE symbol = %s AND funding_time >= %s AND funding_time <= %s ORDER BY funding_time", [symbol, start_n, end_n])
                 rows = cur.fetchall()
-            return [(r[0].replace(tzinfo=timezone.utc) if r[0].tzinfo is None else r[0], float(r[1])) for r in rows]
+            return [(r[0].replace(tzinfo=UTC) if r[0].tzinfo is None else r[0], float(r[1])) for r in rows]
         except Exception: return []
 
-    def load_30d_avg_price(self, symbol: str, dt: datetime) -> Optional[float]:
+    def load_30d_avg_price(self, symbol: str, dt: datetime) -> float | None:
         sym = _validate_symbol(symbol)
         end_ms = int(dt.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() * 1000)
         start_ms = end_ms - 30 * 86400000
@@ -243,7 +242,7 @@ class DataFeed:
             return float(row[0]) if row and row[0] is not None else None
         except Exception: return None
 
-    def load_1d_close(self, symbol: str, date: datetime) -> Optional[float]:
+    def load_1d_close(self, symbol: str, date: datetime) -> float | None:
         sym = _validate_symbol(symbol)
         day_ms = int(date.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() * 1000)
         try:
@@ -253,7 +252,7 @@ class DataFeed:
             return float(row[0]) if row and row[0] is not None else None
         except Exception: return None
 
-    def load_top_trader_ratio(self, symbol: str, dt: datetime) -> Optional[float]:
+    def load_top_trader_ratio(self, symbol: str, dt: datetime) -> float | None:
         key = (symbol, dt)
         if key in self._cache_top_ratio: return self._cache_top_ratio[key]
         t_ms = int(dt.timestamp() * 1000)

@@ -7,7 +7,6 @@ Configure via .env: PG_HOST, PG_PORT, PG_DB, PG_USER, PG_PASSWORD
 from __future__ import annotations
 
 import os
-from typing import Optional
 
 from dotenv import load_dotenv
 
@@ -25,7 +24,7 @@ class PostgresDatabase:
         self.user = os.getenv("PG_USER", "postgres")
         self.password = os.getenv("PG_PASSWORD", "")
 
-    def connect(self) -> "PostgresDatabase":
+    def connect(self) -> PostgresDatabase:
         """Establish database connection."""
         try:
             import psycopg2
@@ -46,7 +45,7 @@ class PostgresDatabase:
             self._conn.close()
             self._conn = None
 
-    def __enter__(self) -> "PostgresDatabase":
+    def __enter__(self) -> PostgresDatabase:
         return self.connect()
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:

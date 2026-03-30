@@ -9,13 +9,18 @@ import logging
 import math
 import statistics
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Optional
 
-from moonshot.models import AmplitudeTrade, RunResult, is_win_result, is_loss_result, derive_exit_reason
-from moonshot.data_feed import DataFeed
 from moonshot.account import Account
+from moonshot.data_feed import DataFeed
+from moonshot.models import (
+    AmplitudeTrade,
+    RunResult,
+    derive_exit_reason,
+    is_loss_result,
+    is_win_result,
+)
 from moonshot.strategy import MoonshotStrategy
 
 logger = logging.getLogger(__name__)
@@ -159,13 +164,16 @@ class MoonshotRunner:
             still_pending = []
             for item in pending_entries:
                 symbol, target_dt = item['symbol'], item['target_date']
-                if current_dt < target_dt: still_pending.append(item); continue
+                if current_dt < target_dt: 
+                    still_pending.append(item); 
+                    luojicontinue
                 if current_dt > target_dt + timedelta(hours=48):
                     if self.verbose:
                         logger.debug("  ⏳ %s pending signal expired after 48h", symbol)
                     continue
                 if len(open_trades) >= cfg.max_positions or any(t.level == symbol for t in open_trades):
-                    still_pending.append(item); continue
+                    still_pending.append(item); 
+                    continue
 
                 st_tf = getattr(cfg, 'st_timeframe', '1h')
                 entry_p = None; entry_t = None
@@ -173,10 +181,12 @@ class MoonshotRunner:
                     trend = self._feed.load_supertrend(symbol, current_dt, period=cfg.st_period, multiplier=cfg.st_multiplier, timeframe=st_tf)
                     if trend == "bearish":
                         candles = self._feed.load_1h(symbol, current_dt, current_dt) if st_tf == '1h' else self._feed.load_15m(symbol, current_dt, current_dt)
-                        if candles: entry_p = candles[0].close; entry_t = current_dt
+                        if candles: entry_p = candles[0].close; 
+                        entry_t = current_dt
                 else:
                     candles = self._feed.load_1h(symbol, current_dt, current_dt)
-                    if candles: entry_p = candles[0].close; entry_t = current_dt
+                    if candles: entry_p = candles[0].close; 
+                    entry_t = current_dt
 
                 if entry_p:
                     cap = self._account.capital_at(entry_t)
@@ -196,7 +206,8 @@ class MoonshotRunner:
                         )
                         self._account.open_position_bt8(trade, invest, cfg.leverage)
                         trade._add_position_multiplier = cfg.add_position_multiplier
-                        trades.append(trade); open_trades.append(trade)
+                        trades.append(trade); 
+                        open_trades.append(trade)
 
                         # Link trade back to signal record
                         idx = item.get('sig_record_idx')
@@ -205,7 +216,8 @@ class MoonshotRunner:
 
                         if self.verbose:
                             logger.info("  🎯 MOONSHOT %s @ %.4f ratio=%.2f invest=%.0f", symbol, entry_p, entry_ratio or 0, invest)
-                else: still_pending.append(item)
+                else: 
+                    still_pending.append(item)
             pending_entries = still_pending
 
             # 4. New signals (daily midnight)
@@ -330,8 +342,8 @@ class MoonshotRunner:
         self,
         trades: list[AmplitudeTrade],
         duration: float,
-        start: Optional[datetime] = None,
-        end: Optional[datetime] = None,
+        start: datetime | None = None,
+        end: datetime | None = None,
     ) -> RunResult:
         active   = [t for t in trades if t.result != "cancelled"]
         wins     = [t for t in active if t.profit_amount is not None and t.profit_amount > 0]
@@ -387,7 +399,7 @@ class MoonshotRunner:
         max_consec_pct = 0.0
         cur_streak = 0
         cur_streak_pct = 0.0
-        for t in sorted(active, key=lambda x: x.entry_time or datetime.min.replace(tzinfo=timezone.utc)):
+        for t in sorted(active, key=lambda x: x.entry_time or datetime.min.replace(tzinfo=UTC)):
             is_loss = is_loss_result(t.result) or (t.result == "timeout" and (t.profit_amount or 0) <= 0)
             is_w    = is_win_result(t.result) or (t.result == "timeout" and (t.profit_amount or 0) > 0)
             if is_loss:
@@ -490,7 +502,8 @@ class MoonshotRunner:
 
     def print_summary(self, result: RunResult) -> None:
         """Print a clean summary to stdout (no logger prefix)."""
-        inf = lambda v: "∞" if v >= 99 else f"{v:.2f}"
+        def inf(v):
+            return "∞" if v >= 99 else f"{v:.2f}"
         net_pnl = result.final_capital - result.initial_capital
         fees_pct = round(self._account.total_fees_pct, 3)
         W = 60

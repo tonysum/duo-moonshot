@@ -2,9 +2,9 @@
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from moonshot.paper.paper_store import PaperStore, MoonshotPosition
+from moonshot.paper.paper_store import MoonshotPosition, PaperStore
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ class PaperAccount:
     async def close_position(self, pos: MoonshotPosition, exit_price: float, exit_time: str, result: str, feed=None):
         actual_pct = (pos.entry_price - exit_price) / pos.entry_price
         profit_amount = pos.invest_amount * actual_pct * pos.leverage
-        
+
         # Commission: 0.05% per side × 2 (roundtrip)
         notional = pos.invest_amount * pos.leverage
         commission = notional * COMMISSION_RATE * 2
@@ -67,15 +67,15 @@ class PaperAccount:
         entry_dt = datetime.fromisoformat(pos.entry_time.replace("Z", "+00:00"))
         exit_dt = datetime.fromisoformat(exit_time.replace("Z", "+00:00"))
         if entry_dt.tzinfo is None:
-            entry_dt = entry_dt.replace(tzinfo=timezone.utc)
+            entry_dt = entry_dt.replace(tzinfo=UTC)
         if exit_dt.tzinfo is None:
-            exit_dt = exit_dt.replace(tzinfo=timezone.utc)
+            exit_dt = exit_dt.replace(tzinfo=UTC)
         holding_hours = int((exit_dt - entry_dt).total_seconds() / 3600)
-        
+
         self.capital += (pos.invest_amount + net_pnl)
         self.store.set_state("capital", str(self.capital))
         self.store.remove_position(pos.symbol)
-        
+
         trade_data = pos.model_dump()
         trade_data.update({
             "exit_price": exit_price,
@@ -91,7 +91,7 @@ class PaperAccount:
             "holding_hours": holding_hours,
         })
         self.store.add_trade(pos.symbol, pos.entry_time, exit_time, trade_data)
-        
+
         fee_detail = f"comm={commission:.2f} fund={funding_fee:.2f}({funding_count}×)"
         self.store.log_event("CLOSE", pos.symbol,
             f"Closed @ {exit_price}, pnl={net_pnl:.2f} ({fee_detail}), {result}")
@@ -101,7 +101,7 @@ class PaperAccount:
         positions = self.store.get_open_positions()
         pos = next((p for p in positions if p.symbol == symbol), None)
         if not pos: return
-        
+
         add_margin = pos.position_size * add_price
         if self.capital < add_margin:
             logger.warning("Insufficient capital for add_position on %s", symbol)

@@ -1,12 +1,12 @@
 """PaperStore — SQLite persistence for Moonshot paper trading.
 """
 
-import sqlite3
 import json
 import logging
-from datetime import datetime, timezone
+import sqlite3
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
+
 from pydantic import BaseModel, ConfigDict
 
 logger = logging.getLogger(__name__)
@@ -26,19 +26,19 @@ class MoonshotPosition(BaseModel):
     target_pct: float
     stop_loss_pct: float
     capital_before: float
-    tp_initial_price: Optional[float] = None  # 开仓时初始止盈价（供 CSV 对齐回测；tp_price 可能被 monitor 更新）
-    signal_price: Optional[float] = None  # 扫描/成交参考价，CSV「信号价格」
+    tp_initial_price: float | None = None  # 开仓时初始止盈价（供 CSV 对齐回测；tp_price 可能被 monitor 更新）
+    signal_price: float | None = None  # 扫描/成交参考价，CSV「信号价格」
     current_price: float = 0.0
     profit_pct: float = 0.0
     unrealized_pnl: float = 0.0
     has_added_position: bool = False
-    add_price: Optional[float] = None
-    add_time: Optional[str] = None
-    lowest_price: Optional[float] = None
-    highest_price: Optional[float] = None  # 持仓以来最高价（空仓：越接近 SL 越危险）
-    entry_account_ratio: Optional[float] = None
-    exit_account_ratio: Optional[float] = None
-    account_ratio_change: Optional[float] = None
+    add_price: float | None = None
+    add_time: str | None = None
+    lowest_price: float | None = None
+    highest_price: float | None = None  # 持仓以来最高价（空仓：越接近 SL 越危险）
+    entry_account_ratio: float | None = None
+    exit_account_ratio: float | None = None
+    account_ratio_change: float | None = None
 
 class PendingSignal(BaseModel):
     symbol: str
@@ -133,7 +133,7 @@ class PaperStore:
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("INSERT OR REPLACE INTO state (key, value) VALUES (?, ?)", (key, value))
 
-    def get_state(self, key: str) -> Optional[str]:
+    def get_state(self, key: str) -> str | None:
         with sqlite3.connect(self.db_path) as conn:
             row = conn.execute("SELECT value FROM state WHERE key = ?", (key,)).fetchone()
             return row[0] if row else None
@@ -146,7 +146,7 @@ class PaperStore:
     def log_event(self, event_type: str, symbol: str, message: str):
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("INSERT INTO events (timestamp, event_type, symbol, message) VALUES (?, ?, ?, ?)",
-                         (datetime.now(timezone.utc).isoformat(), event_type, symbol, message))
+                         (datetime.now(UTC).isoformat(), event_type, symbol, message))
 
     def get_events(self, limit: int = 100) -> list[dict]:
         with sqlite3.connect(self.db_path) as conn:

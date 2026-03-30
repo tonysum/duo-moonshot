@@ -12,8 +12,6 @@ import json
 import logging
 import os
 import time
-import traceback
-from typing import Optional
 
 import websockets
 
@@ -27,7 +25,7 @@ WS_URLS = [
 STALE_THRESHOLD = 30  # seconds — fall back to REST if older
 
 
-def _detect_proxy() -> Optional[str]:
+def _detect_proxy() -> str | None:
     """Detect proxy from environment variables."""
     for var in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"):
         proxy = os.environ.get(var)
@@ -53,7 +51,7 @@ class PriceFeedWS:
 
     # ── Public API ────────────────────────────────────────────────
 
-    def get_price(self, symbol: str) -> Optional[float]:
+    def get_price(self, symbol: str) -> float | None:
         """Get cached price if fresh (< STALE_THRESHOLD seconds old)."""
         ts = self._timestamps.get(symbol)
         if ts is None:

@@ -3,20 +3,19 @@
 
 import asyncio
 import logging
-from datetime import datetime, timezone, timedelta
-from typing import Optional, Union
+from datetime import UTC, datetime, timedelta
 
 from moonshot.client import BinanceFuturesClient
-from moonshot.strategy import MoonshotConfig, MoonshotStrategy
-from moonshot.rolling_strategy import RollingConfig, RollingStrategy
+from moonshot.paper.daily_scanner import DailyScanner
 from moonshot.paper.live_feed import LiveFeed
 from moonshot.paper.paper_account import PaperAccount
 from moonshot.paper.paper_store import PaperStore
-from moonshot.paper.daily_scanner import DailyScanner
-from moonshot.paper.rolling_scanner import RollingScanner
 from moonshot.paper.position_monitor import PositionMonitor
+from moonshot.paper.rolling_scanner import RollingScanner
 from moonshot.paper.supertrend_monitor import SupertrendMonitor
 from moonshot.paper.ws_feed import PriceFeedWS
+from moonshot.rolling_strategy import RollingConfig, RollingStrategy
+from moonshot.strategy import MoonshotConfig, MoonshotStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +30,7 @@ def _next_rolling_scan_utc(now: datetime, interval_hours: int) -> datetime:
     n = max(1, int(interval_hours))
     th = int(now.timestamp()) // 3600
     nh = ((th // n) + 1) * n
-    return datetime.fromtimestamp(nh * 3600, tz=timezone.utc)
+    return datetime.fromtimestamp(nh * 3600, tz=UTC)
 
 
 class PaperRunner:
@@ -39,7 +38,7 @@ class PaperRunner:
 
     def __init__(
         self,
-        config: Union[MoonshotConfig, RollingConfig],
+        config: MoonshotConfig | RollingConfig,
         api_key: str = "",
         api_secret: str = "",
     ):
@@ -61,7 +60,7 @@ class PaperRunner:
 
         self.monitor = PositionMonitor(self.feed, self.store, self.account, self._strategy)
         self.st_monitor = SupertrendMonitor(self.feed, self.store, self.scanner, config)
-        
+
         self._running = False
         self._tasks = []
 
@@ -120,7 +119,7 @@ class PaperRunner:
 
         while self._running:
             try:
-                now = datetime.now(timezone.utc)
+                now = datetime.now(UTC)
                 if is_rolling:
                     target = _next_rolling_scan_utc(now, interval_hours)
                     wait_secs = max(60, (target - now).total_seconds())
@@ -152,7 +151,7 @@ class PaperRunner:
     async def _equity_loop(self):
         while self._running:
             try:
-                now = datetime.now(timezone.utc)
+                now = datetime.now(UTC)
                 cash = float(self.account.capital)
                 positions = self.store.get_open_positions()
                 pos_value = 0.0
@@ -161,7 +160,7 @@ class PaperRunner:
                     if price:
                         pnl = p.invest_amount * (p.entry_price - price) / p.entry_price * p.leverage
                         pos_value += (p.invest_amount + pnl)
-                
+
                 self.store.append_equity_snapshot(now.isoformat(), cash + pos_value, cash)
                 await asyncio.sleep(300)
             except asyncio.CancelledError: break
@@ -270,7 +269,7 @@ class DualPaperRunner:
     async def _daily_scanner_loop(self):
         while self._running:
             try:
-                now = datetime.now(timezone.utc)
+                now = datetime.now(UTC)
                 target = now.replace(hour=0, minute=5, second=0, microsecond=0)
                 if now >= target:
                     target += timedelta(days=1)
@@ -294,7 +293,7 @@ class DualPaperRunner:
 
         while self._running:
             try:
-                now = datetime.now(timezone.utc)
+                now = datetime.now(UTC)
                 target = _next_rolling_scan_utc(now, interval_hours)
                 wait_secs = max(60, (target - now).total_seconds())
                 logger.info(
@@ -316,7 +315,7 @@ class DualPaperRunner:
     async def _dual_equity_loop(self):
         while self._running:
             try:
-                now = datetime.now(timezone.utc)
+                now = datetime.now(UTC)
                 for store, account in [
                     (self.daily_store, self.daily_account),
                     (self.rolling_store, self.rolling_account),

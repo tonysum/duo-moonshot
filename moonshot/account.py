@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import bisect
 from datetime import datetime
-from typing import Optional
 
 from moonshot.models import AmplitudeTrade
 
@@ -38,7 +37,7 @@ class Account:
         # Ledger: snapshots for capital_at(entry_time) lookup
         self._capital_snapshots: list[tuple[datetime, float]] = []
         self._snapshot_times: list[datetime] = []
-        
+
         # Performance tracking
         self._equity_curve: list[tuple[datetime, float]] = []
 
@@ -105,7 +104,7 @@ class Account:
         original_size = trade.position_size
         add_size = original_size * multiplier
         total_size = original_size + add_size
-        
+
         new_avg = (trade.entry_price * original_size + add_price * add_size) / total_size
         add_margin = add_size * add_price
 

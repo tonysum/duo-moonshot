@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
 
 
 @dataclass
@@ -60,16 +59,16 @@ class AmplitudeTrade:
 
     # ── Fill (成交) ─────────────────────────────────────────────────
     status: str = "pending"       # pending | filled | cancelled
-    filled_time: Optional[datetime] = None
+    filled_time: datetime | None = None
     invest_amount: float = 0.0    # Capital deployed
     position_size: float = 0.0    # Position quantity
     capital_before: float = 0.0   # Account balance at fill
 
     # ── Settlement (结算) ───────────────────────────────────────────
     result: str = "pending"       # pending | success | failed | timeout | cancelled
-    exit_time: Optional[datetime] = None
-    exit_price: Optional[float] = None
-    holding_hours: Optional[int] = None
+    exit_time: datetime | None = None
+    exit_price: float | None = None
+    holding_hours: int | None = None
     actual_pct: float = 0.0       # Raw price change %
     profit_pct: float = 0.0       # Leveraged return %
     profit_amount: float = 0.0    # Dollar PnL
@@ -79,19 +78,19 @@ class AmplitudeTrade:
     # ── Moonshot-specific extensions ─────────────────────────────────
     surge_pct: float = 0.0
     has_added_position: bool = False
-    add_position_price: Optional[float] = None
-    add_position_time: Optional[datetime] = None
-    avg_entry_price: Optional[float] = None
+    add_position_price: float | None = None
+    add_position_time: datetime | None = None
+    avg_entry_price: float | None = None
     funding_fee_cost: float = 0.0
-    entry_premium_avg: Optional[float] = None
+    entry_premium_avg: float | None = None
     volume_24h: float = 0.0
-    signal_price: Optional[float] = None
+    signal_price: float | None = None
     entry_reason: str = ""
-    tp_initial_price: Optional[float] = None  # Initial TP price at entry (before timeout reduction)
-    entry_account_ratio: Optional[float] = None
-    exit_account_ratio: Optional[float] = None
-    account_ratio_change: Optional[float] = None
-    lowest_price: Optional[float] = None
+    tp_initial_price: float | None = None  # Initial TP price at entry (before timeout reduction)
+    entry_account_ratio: float | None = None
+    exit_account_ratio: float | None = None
+    account_ratio_change: float | None = None
+    lowest_price: float | None = None
     _add_position_multiplier: float = 1.0
 
     # ── Computed Properties ─────────────────────────────────────────

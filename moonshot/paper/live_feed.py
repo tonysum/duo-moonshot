@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from moonshot.client import BinanceFuturesClient
 from moonshot.models import Candle
@@ -20,7 +20,7 @@ class LiveFeed:
     def __init__(self, client: BinanceFuturesClient, ws_feed: PriceFeedWS | None = None):
         self._client = client
         self._ws_feed = ws_feed
-        self._usdt_symbols: Optional[list[str]] = None
+        self._usdt_symbols: list[str] | None = None
 
     async def get_usdt_symbols(self) -> list[str]:
         """Get all tradeable USDT-margined perpetual symbols."""
@@ -41,7 +41,7 @@ class LiveFeed:
         self,
         min_pct_chg: float = 10.0,
         top_n: int = 1,
-        diagnostics: Optional[dict[str, Any]] = None,
+        diagnostics: dict[str, Any] | None = None,
     ) -> list[tuple[str, float]]:
         """Scan all symbols for yesterday's top N daily gainers.
 
@@ -114,7 +114,7 @@ class LiveFeed:
         usdt_perps.sort(key=lambda x: x[1], reverse=True)
         return usdt_perps[:top_n]
 
-    async def load_30d_avg_price(self, symbol: str) -> Optional[float]:
+    async def load_30d_avg_price(self, symbol: str) -> float | None:
         try:
             klines = await self._client.get_klines(
                 symbol=symbol, interval="1d", limit=31,
@@ -127,9 +127,9 @@ class LiveFeed:
             logger.warning("Failed to load 30d avg for %s: %s", symbol, e)
             return None
 
-    _listing_date_cache: dict[str, Optional[datetime]] = {}
+    _listing_date_cache: dict[str, datetime | None] = {}
 
-    async def load_listing_date(self, symbol: str) -> Optional[datetime]:
+    async def load_listing_date(self, symbol: str) -> datetime | None:
         """Get listing date by querying the earliest 1d kline."""
         if symbol in self._listing_date_cache:
             return self._listing_date_cache[symbol]
@@ -138,7 +138,7 @@ class LiveFeed:
                 symbol=symbol, interval="1d", limit=1, start_time=0,
             )
             if klines:
-                listing = datetime.fromtimestamp(klines[0].open_time / 1000, tz=timezone.utc)
+                listing = datetime.fromtimestamp(klines[0].open_time / 1000, tz=UTC)
                 self._listing_date_cache[symbol] = listing
                 return listing
         except Exception as e:
@@ -146,9 +146,9 @@ class LiveFeed:
         self._listing_date_cache[symbol] = None
         return None
 
-    async def load_1d_open(self, symbol: str, date: datetime) -> Optional[float]:
+    async def load_1d_open(self, symbol: str, date: datetime) -> float | None:
         try:
-            day_start_ms = int(date.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc).timestamp() * 1000)
+            day_start_ms = int(date.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=UTC).timestamp() * 1000)
             klines = await self._client.get_klines(
                 symbol=symbol, interval="1d",
                 start_time=day_start_ms,
@@ -159,9 +159,9 @@ class LiveFeed:
         except Exception:
             return None
 
-    async def load_1d_close(self, symbol: str, date: datetime) -> Optional[float]:
+    async def load_1d_close(self, symbol: str, date: datetime) -> float | None:
         try:
-            day_start_ms = int(date.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=timezone.utc).timestamp() * 1000)
+            day_start_ms = int(date.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=UTC).timestamp() * 1000)
             klines = await self._client.get_klines(
                 symbol=symbol, interval="1d",
                 start_time=day_start_ms,
@@ -175,7 +175,7 @@ class LiveFeed:
     async def load_24h_volume(self, symbol: str, dt: datetime) -> float:
         """24h quote volume ending at dt. Aligns with DataFeed: SUM of 1h candles over [dt-24h, dt)."""
         try:
-            end_ms = int(dt.replace(tzinfo=timezone.utc).timestamp() * 1000)
+            end_ms = int(dt.replace(tzinfo=UTC).timestamp() * 1000)
             start_ms = end_ms - 86400_000
             klines = await self._client.get_klines(symbol=symbol, interval="1h", start_time=start_ms, end_time=end_ms, limit=25)
             if not klines:
@@ -184,27 +184,27 @@ class LiveFeed:
         except Exception:
             return -1.0
 
-    async def load_top_trader_ratio(self, symbol: str, dt: Optional[datetime] = None) -> Optional[float]:
+    async def load_top_trader_ratio(self, symbol: str, dt: datetime | None = None) -> float | None:
         try:
             ratios = await self._client.get_top_long_short_account_ratio(symbol=symbol, period="1h", limit=1)
             return float(ratios[0].long_short_ratio) if ratios else None
         except Exception:
             return None
 
-    async def load_1h_candle(self, symbol: str) -> Optional[Candle]:
+    async def load_1h_candle(self, symbol: str) -> Candle | None:
         try:
             klines = await self._client.get_klines(symbol=symbol, interval="1h", limit=2)
             if len(klines) < 2: return None
             k = klines[-2]
             return Candle(
-                open_time=datetime.fromtimestamp(k.open_time / 1000, tz=timezone.utc),
+                open_time=datetime.fromtimestamp(k.open_time / 1000, tz=UTC),
                 open=float(k.open), high=float(k.high), low=float(k.low), close=float(k.close),
                 volume=0.0 # Volume not strictly needed for exit check
             )
         except Exception:
             return None
 
-    async def get_current_price(self, symbol: str) -> Optional[float]:
+    async def get_current_price(self, symbol: str) -> float | None:
         # Try WebSocket cache first
         if self._ws_feed:
             ws_price = self._ws_feed.get_price(symbol)
@@ -225,7 +225,7 @@ class LiveFeed:
                 end_time=int(end.timestamp() * 1000),
                 limit=1000,
             )
-            return [(datetime.fromtimestamp(r.funding_time / 1000, tz=timezone.utc), float(r.funding_rate)) for r in records]
+            return [(datetime.fromtimestamp(r.funding_time / 1000, tz=UTC), float(r.funding_rate)) for r in records]
         except Exception:
             return []
     async def load_supertrend(self, symbol: str, period: int = 10, multiplier: float = 3.0, timeframe: str = "1h") -> str:
@@ -241,7 +241,7 @@ class LiveFeed:
             # Convert to candles
             candles = [
                 Candle(
-                    open_time=datetime.fromtimestamp(k.open_time / 1000, tz=timezone.utc),
+                    open_time=datetime.fromtimestamp(k.open_time / 1000, tz=UTC),
                     open=float(k.open), high=float(k.high), low=float(k.low), close=float(k.close)
                 ) for k in klines
             ]
@@ -265,18 +265,18 @@ class LiveFeed:
             ubounds = [0.0] * len(candles)
             lbounds = [0.0] * len(candles)
             trend = [1] * len(candles) # 1 for bullish, -1 for bearish
-            
+
             start_idx = period
             for i in range(start_idx, len(candles)):
                 atr = atrs[i]
                 hl2 = hl2s[i]
                 curr_ub = hl2 + (multiplier * atr)
                 curr_lb = hl2 - (multiplier * atr)
-                
+
                 prev_ub = ubounds[i-1]
                 prev_lb = lbounds[i-1]
                 prev_close = candles[i-1].close
-                
+
                 # Basic Supertrend logic
                 if i == start_idx:
                     ubounds[i] = curr_ub
@@ -284,7 +284,7 @@ class LiveFeed:
                 else:
                     ubounds[i] = curr_ub if curr_ub < prev_ub or prev_close > prev_ub else prev_ub
                     lbounds[i] = curr_lb if curr_lb > prev_lb or prev_close < prev_lb else prev_lb
-                
+
                 if candles[i].close > ubounds[i]:
                     trend[i] = 1
                 elif candles[i].close < lbounds[i]:
@@ -296,7 +296,7 @@ class LiveFeed:
                         lbounds[i] = prev_lb
                     if trend[i] == -1 and ubounds[i] > prev_ub:
                         ubounds[i] = prev_ub
-            
+
             return "bullish" if trend[-1] == 1 else "bearish"
         except Exception as e:
             logger.error("Failed to calculate Supertrend for %s: %s", symbol, e)

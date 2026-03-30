@@ -1,0 +1,23 @@
+{
+  "params": {
+    "rolling_window_hours": 42,
+    "scan_interval_hours": 2,
+    "signal_cooldown_hours": 8,
+    "top_n": 5,
+    "min_pct_chg": 5.0,
+    "tp_initial": 0.16,
+    "sl_threshold": 0.42,
+    "tp_reduced": 0.08,
+    "tp_hours_threshold": 6,
+    "trailing_activation_pct": 0.08,
+    "trailing_distance_pct": 0.04,
+    "add_position_threshold": 0.2,
+    "tp_after_add": 0.46,
+    "leverage": 3,
+    "max_positions": 8,
+    "position_size_ratio": 0.08,
+    "max_hold_days": 7,
+    "position_sizing_mode": "free_cash_pct",
+    "fixed_invest_usd": null
+  }
+}

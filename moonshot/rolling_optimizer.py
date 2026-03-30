@@ -19,6 +19,7 @@ Usage:
     python -m moonshot.rolling_optimizer --phase 1 --trials 60
     python -m moonshot.rolling_optimizer --phase 2 --trials 80
     python -m moonshot.rolling_optimizer --phase 3 --trials 100
+    python -m moonshot.rolling_optimizer --phase 3 --export-config .   # writes config/r24_params.json
     python -m moonshot.rolling_optimizer --phase 1 --oos-ratio 0.3
     python -m moonshot.rolling_optimizer --sizing equity_pct --phase 3 --trials 80
     python -m moonshot.rolling_optimizer --sizing fixed_usd --fixed-invest 400 --phase 1
@@ -32,18 +33,18 @@ import json
 import logging
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 import optuna
 
+from moonshot.account import Account
 from moonshot.db import get_postgres_db as get_db
-from moonshot.rolling_strategy import RollingStrategy, RollingConfig
+from moonshot.models import RunResult
+from moonshot.r24_config_load import DEFAULT_CANONICAL, export_params_json
 from moonshot.rolling_data_feed import RollingDataFeed
 from moonshot.rolling_runner import RollingRunner
-from moonshot.account import Account
-from moonshot.models import RunResult
+from moonshot.rolling_strategy import RollingConfig, RollingStrategy
 from moonshot.sizing import PositionSizingMode
 
 logger = logging.getLogger(__name__)
@@ -51,7 +52,7 @@ logger = logging.getLogger(__name__)
 
 def _sizing_fields(
     position_sizing_mode: PositionSizingMode,
-    fixed_invest_usd: Optional[float],
+    fixed_invest_usd: float | None,
 ) -> dict:
     """RollingConfig kwargs for position sizing (all phases + OOS)."""
     return {
@@ -107,7 +108,7 @@ def _phase1_objective(
     feed: RollingDataFeed,
     initial_capital: float,
     position_sizing_mode: PositionSizingMode,
-    fixed_invest_usd: Optional[float],
+    fixed_invest_usd: float | None,
 ) -> float:
     """Phase 1: Signal quality parameters."""
     cfg = RollingConfig(
@@ -139,7 +140,7 @@ def _phase2_objective(
     initial_capital: float,
     locked_params: dict,
     position_sizing_mode: PositionSizingMode,
-    fixed_invest_usd: Optional[float],
+    fixed_invest_usd: float | None,
 ) -> float:
     """Phase 2: Position management parameters (Phase 1 params locked)."""
     cfg = RollingConfig(
@@ -177,7 +178,7 @@ def _phase3_objective(
     initial_capital: float,
     prior_params: dict,
     position_sizing_mode: PositionSizingMode,
-    fixed_invest_usd: Optional[float],
+    fixed_invest_usd: float | None,
 ) -> float:
     """Phase 3: Full joint search with Phase 1+2 as informed prior."""
     # Use prior best as centre for tighter ranges
@@ -297,18 +298,19 @@ def _save_best_params(phase: int, params: dict, score: float) -> Path:
 def optimize(
     phase: int = 1,
     n_trials: int = 60,
-    start: Optional[datetime] = None,
-    end: Optional[datetime] = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
     initial_capital: float = 10_000.0,
     oos_ratio: float = 0.25,
     position_sizing_mode: PositionSizingMode = "free_cash_pct",
-    fixed_invest_usd: Optional[float] = None,
+    fixed_invest_usd: float | None = None,
+    export_config_path: Path | None = None,
 ):
     """Optimize with train/OOS split. Optimize on train; report OOS metrics for best params."""
     if start is None:
-        start = datetime(2025, 1, 1, tzinfo=timezone.utc)
+        start = datetime(2025, 1, 1, tzinfo=UTC)
     if end is None:
-        end = datetime.now(timezone.utc)
+        end = datetime.now(UTC)
 
     total_delta = end - start
     train_delta = total_delta * (1 - oos_ratio)
@@ -387,6 +389,9 @@ def optimize(
     best["position_sizing_mode"] = position_sizing_mode
     best["fixed_invest_usd"] = fixed_invest_usd
     saved = _save_best_params(phase, best, best_score)
+    if export_config_path is not None:
+        out = export_params_json(best, Path(export_config_path))
+        print(f"  📄 Exported canonical params: {out}")
 
     print(f"\n{'='*60}")
     print(f"  ✅ Phase {phase} Complete")
@@ -394,7 +399,7 @@ def optimize(
     print(f"  Time: {elapsed:.1f}s ({elapsed/n_trials:.1f}s/trial)")
     print(f"  Saved: {saved}")
     print(f"{'─'*60}")
-    print(f"  🏆 Best Parameters:")
+    print("  🏆 Best Parameters:")
     for k, v in sorted(best.items()):
         print(f"    {k:<30s} = {v}")
     print(f"{'='*60}")
@@ -416,7 +421,7 @@ def optimize(
 
     # Top 5 trials
     trials_sorted = sorted(study.trials, key=lambda t: t.value if t.value is not None else -9999, reverse=True)
-    print(f"\n  📊 Top 5 Trials:")
+    print("\n  📊 Top 5 Trials:")
     print(f"  {'#':<4s} {'Score':>10s}  Key Params")
     print(f"  {'─'*56}")
     for i, t in enumerate(trials_sorted[:5]):
@@ -449,12 +454,26 @@ def main():
         default=None,
         help="Fixed margin per trade when --sizing fixed_usd",
     )
+    parser.add_argument(
+        "--export-config",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help=(
+            "After this phase, write RollingConfig-compatible JSON to PATH "
+            f"(use '.' for {DEFAULT_CANONICAL})"
+        ),
+    )
 
     args = parser.parse_args()
     if args.sizing == "fixed_usd" and (args.fixed_invest is None or args.fixed_invest <= 0):
         parser.error("--fixed-invest must be a positive number when --sizing fixed_usd")
-    start = datetime.strptime(args.start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-    end = datetime.strptime(args.end, "%Y-%m-%d").replace(tzinfo=timezone.utc) if args.end else None
+    start = datetime.strptime(args.start, "%Y-%m-%d").replace(tzinfo=UTC)
+    end = datetime.strptime(args.end, "%Y-%m-%d").replace(tzinfo=UTC) if args.end else None
+
+    export_path: Path | None = None
+    if args.export_config:
+        export_path = DEFAULT_CANONICAL if args.export_config.strip() == "." else Path(args.export_config)
 
     optimize(
         phase=args.phase,
@@ -465,6 +484,7 @@ def main():
         oos_ratio=args.oos_ratio,
         position_sizing_mode=args.sizing,
         fixed_invest_usd=args.fixed_invest,
+        export_config_path=export_path,
     )
 
 

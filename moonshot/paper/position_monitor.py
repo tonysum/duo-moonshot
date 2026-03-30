@@ -2,14 +2,13 @@
 """
 
 import logging
-from datetime import datetime, timezone
-from typing import Optional, Union
+from datetime import UTC, datetime
 
-from moonshot.strategy import MoonshotStrategy, MoonshotConfig
-from moonshot.rolling_strategy import RollingStrategy, RollingConfig
 from moonshot.paper.live_feed import LiveFeed
 from moonshot.paper.paper_account import PaperAccount
-from moonshot.paper.paper_store import PaperStore, MoonshotPosition
+from moonshot.paper.paper_store import MoonshotPosition, PaperStore
+from moonshot.rolling_strategy import RollingStrategy
+from moonshot.strategy import MoonshotStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +20,7 @@ class PositionMonitor:
         feed: LiveFeed,
         store: PaperStore,
         account: PaperAccount,
-        strategy: Union[MoonshotStrategy, RollingStrategy],
+        strategy: MoonshotStrategy | RollingStrategy,
     ):
         self._feed = feed
         self._store = store
@@ -45,8 +44,8 @@ class PositionMonitor:
 
         entry_dt = datetime.fromisoformat(pos.entry_time)
         if entry_dt.tzinfo is None:
-            entry_dt = entry_dt.replace(tzinfo=timezone.utc)
-        now_dt = datetime.now(timezone.utc)
+            entry_dt = entry_dt.replace(tzinfo=UTC)
+        now_dt = datetime.now(UTC)
         hold_hours = (now_dt - entry_dt).total_seconds() / 3600
 
         pos.current_price = current_price
@@ -70,8 +69,12 @@ class PositionMonitor:
             await self._account.close_position(pos, current_price, now_dt.isoformat(), "timeout", feed=self._feed)
             return
 
+        # 与回测一致：check_exit 需要「存续期内见过的」高/低价，而不是仅当前 tick。
+        # 若只用 current_price 当作 candle_high/low，价位先触及 SL/TP 再回抽会在下一轮漏判。
+        hi = pos.highest_price if pos.highest_price is not None else max(pos.entry_price, current_price)
+        lo = pos.lowest_price if pos.lowest_price is not None else current_price
         result = self._strategy.check_exit(
-            pos, candle_high=current_price, candle_low=current_price,
+            pos, candle_high=hi, candle_low=lo,
             current_price=current_price, current_time=now_dt, hold_hours=hold_hours
         )
 

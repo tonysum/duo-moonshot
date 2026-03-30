@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Literal
 
 PositionSizingMode = Literal["free_cash_pct", "equity_pct", "fixed_usd"]
 
@@ -13,7 +13,7 @@ def compute_order_margin(
     total_equity: float,
     mode: PositionSizingMode,
     position_size_ratio: float,
-    fixed_invest_usd: Optional[float],
+    fixed_invest_usd: float | None,
 ) -> float:
     """USD margin for the next open; never exceeds ``free_cash``.
 

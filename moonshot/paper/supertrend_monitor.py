@@ -2,10 +2,11 @@
 """
 
 import logging
-from moonshot.strategy import MoonshotConfig
+
+from moonshot.paper.daily_scanner import DailyScanner, LiveFeedAdapter
 from moonshot.paper.live_feed import LiveFeed
 from moonshot.paper.paper_store import PaperStore, PendingSupertrendSignal
-from moonshot.paper.daily_scanner import DailyScanner, LiveFeedAdapter
+from moonshot.strategy import MoonshotConfig
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ class SupertrendMonitor:
     async def check_single(self, sig: PendingSupertrendSignal):
         symbol = sig.symbol
         timeframe = getattr(self._config, 'st_timeframe', '1h')
-        
+
         positions = self._store.get_open_positions()
         if len(positions) >= self._config.max_positions: return
         if any(p.symbol == symbol for p in positions):

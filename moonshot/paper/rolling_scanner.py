@@ -6,13 +6,13 @@ Runs every scan_interval_hours at :00.
 
 import json
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 
-from moonshot.rolling_strategy import RollingStrategy, RollingConfig
-from moonshot.paper.live_feed import LiveFeed
 from moonshot.paper.daily_scanner import LiveFeedAdapter
+from moonshot.paper.live_feed import LiveFeed
 from moonshot.paper.paper_account import PaperAccount
-from moonshot.paper.paper_store import PaperStore, MoonshotPosition
+from moonshot.paper.paper_store import MoonshotPosition, PaperStore
+from moonshot.rolling_strategy import RollingConfig, RollingStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ class RollingScanner:
             try:
                 exit_dt = datetime.fromisoformat(exit_str.replace("Z", "+00:00"))
                 if exit_dt.tzinfo is None:
-                    exit_dt = exit_dt.replace(tzinfo=timezone.utc)
+                    exit_dt = exit_dt.replace(tzinfo=UTC)
                 if (now - exit_dt).total_seconds() < self._config.signal_cooldown_hours * 3600:
                     return True
             except Exception:
@@ -47,7 +47,7 @@ class RollingScanner:
         return False
 
     async def scan(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         self._store.log_event("SCAN", "SYSTEM", "Starting R24 rolling scan")
 
         gainers = await self._feed.scan_rolling_top_gainers(
@@ -137,7 +137,7 @@ class RollingScanner:
         pos = MoonshotPosition(
             symbol=symbol,
             entry_price=current_price,
-            entry_time=datetime.now(timezone.utc).isoformat(),
+            entry_time=datetime.now(UTC).isoformat(),
             invest_amount=float(invest),
             position_size=float(invest / current_price),
             leverage=self._config.leverage,

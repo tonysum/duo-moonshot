@@ -3,14 +3,17 @@
 
 import json
 import logging
-from datetime import datetime, timezone, timedelta
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
-from moonshot.strategy import MoonshotStrategy, MoonshotConfig
-from moonshot.models import Candle
 from moonshot.paper.live_feed import LiveFeed
 from moonshot.paper.paper_account import PaperAccount
-from moonshot.paper.paper_store import PaperStore, MoonshotPosition, PendingSignal, PendingSupertrendSignal
+from moonshot.paper.paper_store import (
+    MoonshotPosition,
+    PaperStore,
+    PendingSignal,
+    PendingSupertrendSignal,
+)
+from moonshot.strategy import MoonshotConfig, MoonshotStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -20,9 +23,9 @@ class LiveFeedAdapter:
     def __init__(self, symbol: str, feed: LiveFeed):
         self.symbol = symbol
         self.feed = feed
-        self._daily_data: dict[str, dict] = {} 
+        self._daily_data: dict[str, dict] = {}
         self._30d_avg_price: float = 0.0
-        self._listing_date: Optional[datetime] = None
+        self._listing_date: datetime | None = None
 
     async def prefetch(self, signal_date: datetime):
         self._30d_avg_price = await self.feed.load_30d_avg_price(self.symbol) or 0.0
@@ -39,10 +42,10 @@ class LiveFeedAdapter:
     def _get_day(self, dt: datetime) -> dict:
         return self._daily_data.get(dt.strftime("%Y-%m-%d"), {})
 
-    def load_30d_avg_price(self, symbol: str, dt: Optional[datetime] = None) -> float:
+    def load_30d_avg_price(self, symbol: str, dt: datetime | None = None) -> float:
         return self._30d_avg_price
 
-    def load_listing_date(self, symbol: str) -> Optional[datetime]:
+    def load_listing_date(self, symbol: str) -> datetime | None:
         return self._listing_date
 
     def load_1d_open(self, symbol: str, dt: datetime, *args) -> float:
@@ -66,7 +69,7 @@ class DailyScanner:
         self._strategy = MoonshotStrategy(config)
 
     async def scan(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         self._store.log_event("SCAN", "SYSTEM", "Starting daily scan")
         await self._process_pending_signals(now)
 
@@ -193,11 +196,11 @@ class DailyScanner:
     async def _process_pending_signals(self, now: datetime):
         pending = self._store.get_pending_signals()
         for sig in pending:
-            surge_date = datetime.strptime(sig.signal_date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            surge_date = datetime.strptime(sig.signal_date_str, "%Y-%m-%d").replace(tzinfo=UTC)
             # delay_days=1: enter at surge_date+1 day (not +2)
             if now < surge_date + timedelta(days=1):
                 continue
-            
+
             adapter = LiveFeedAdapter(sig.symbol, self._feed)
             await adapter.prefetch(surge_date)
             open_positions = [p.symbol for p in self._store.get_open_positions()]
@@ -225,7 +228,7 @@ class DailyScanner:
         entry_ratio = await self._feed.load_top_trader_ratio(symbol)
 
         pos = MoonshotPosition(
-            symbol=symbol, entry_price=current_price, entry_time=datetime.now(timezone.utc).isoformat(),
+            symbol=symbol, entry_price=current_price, entry_time=datetime.now(UTC).isoformat(),
             invest_amount=float(invest), position_size=float(invest / current_price),
             leverage=self._config.leverage, surge_pct=surge_pct, entry_reason=reason,
             tp_price=tp_price, sl_price=sl_price, target_pct=self._config.tp_initial * 100,

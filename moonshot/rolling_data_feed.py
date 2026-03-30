@@ -12,13 +12,12 @@ import logging
 import os
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
 import psycopg2
 from psycopg2 import sql
 
-from moonshot.data_feed import DataFeed, _validate_symbol
+from moonshot.data_feed import DataFeed
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +83,7 @@ def _process_symbol_batch(
                     close_24h = close_map.get(ts_window_ago)
                     if close_24h and close_24h > 0:
                         pct_chg = (close_now - close_24h) / close_24h * 100
-                        dt = datetime.fromtimestamp(ts_int / 1000, tz=timezone.utc)
+                        dt = datetime.fromtimestamp(ts_int / 1000, tz=UTC)
                         key = dt.strftime('%Y-%m-%d %H:00')
                         result[key].append((symbol, pct_chg))
             except Exception:

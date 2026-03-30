@@ -15,21 +15,18 @@ Strategies:
   rolling   R24 hourly 24h-rolling top gainer scan
 """
 
-import asyncio
 import argparse
-import dataclasses
-import json
+import asyncio
 import logging
 import os
-from pathlib import Path
 
 import uvicorn
 from dotenv import load_dotenv
 
-from moonshot.strategy import MoonshotConfig
-from moonshot.rolling_strategy import RollingConfig
-from moonshot.paper.runner import PaperRunner, DualPaperRunner
 from moonshot.paper import api
+from moonshot.paper.runner import DualPaperRunner, PaperRunner
+from moonshot.r24_config_load import load_rolling_config
+from moonshot.strategy import MoonshotConfig
 
 
 def _cli_db_lanes(args) -> list[tuple[str, str]]:
@@ -63,17 +60,10 @@ def _add_db_select_args(p):
     )
 
 
-def _load_config(strategy: str):
+def _load_config(strategy: str, r24_config: str | None = None):
     """Load config: MoonshotConfig (daily) or RollingConfig (rolling)."""
     if strategy == "rolling":
-        # Optional: load from reports/optimizer/r24_phase3_best.json
-        phase3 = Path("reports/optimizer/r24_phase3_best.json")
-        if phase3.exists():
-            data = json.loads(phase3.read_text())
-            params = data.get("params", {})
-            valid = {f.name for f in dataclasses.fields(RollingConfig)}
-            return RollingConfig(**{k: v for k, v in params.items() if k in valid})
-        return RollingConfig()
+        return load_rolling_config(r24_config)
     return MoonshotConfig()
 
 
@@ -82,12 +72,13 @@ async def run_start(args):
     api_key = os.environ.get("BINANCE_API_KEY", "")
     api_secret = os.environ.get("BINANCE_API_SECRET", "")
 
+    r24 = getattr(args, "r24_config", None)
     if args.strategy == "both":
         config_daily = _load_config("daily")
-        config_rolling = _load_config("rolling")
+        config_rolling = _load_config("rolling", r24)
         runner = DualPaperRunner(config_daily, config_rolling, api_key=api_key, api_secret=api_secret)
     else:
-        config = _load_config(args.strategy)
+        config = _load_config(args.strategy, r24 if args.strategy == "rolling" else None)
         runner = PaperRunner(config, api_key=api_key, api_secret=api_secret)
 
     api._runner = runner
@@ -115,13 +106,19 @@ def main():
                "  python -m moonshot.paper reset --confirm\n"
     )
     sub = parser.add_subparsers(dest="command")
-    
+
     # start
     p_start = sub.add_parser("start", help="Start paper trading server")
     p_start.add_argument("--port", type=int, default=8100)
     p_start.add_argument("--strategy", choices=["daily", "rolling", "both"], default="daily",
                         help="Strategy: daily, rolling, or both (parallel)")
-    
+    p_start.add_argument(
+        "--r24-config",
+        default=None,
+        metavar="PATH",
+        help="R24 params JSON (rolling / both only); overrides MOONSHOT_R24_PARAMS and default search",
+    )
+
     # status
     p_status = sub.add_parser("status", help="Show capital and position count")
     _add_db_select_args(p_status)
@@ -144,18 +141,24 @@ def main():
     # summary
     p_summary = sub.add_parser("summary", help="Show performance summary")
     _add_db_select_args(p_summary)
-    
+
     # scan
     p_scan = sub.add_parser("scan", help="Trigger manual scan")
     p_scan.add_argument("--strategy", choices=["daily", "rolling", "both"], default="daily",
                        help="Strategy for scan")
-    
+    p_scan.add_argument(
+        "--r24-config",
+        default=None,
+        metavar="PATH",
+        help="R24 params JSON (rolling / both only); same resolution as start",
+    )
+
     # reset
     p_reset = sub.add_parser("reset", help="Reset all paper trading data")
     p_reset.add_argument("--confirm", action="store_true", help="Confirm reset")
-    
+
     args = parser.parse_args()
-    
+
     if not args.command:
         parser.print_help()
         return
@@ -182,6 +185,7 @@ def main():
 
     elif args.command == "positions":
         from datetime import datetime
+
         from moonshot.paper.paper_store import PaperStore
 
         for title, db_path in _cli_db_lanes(args):
@@ -309,12 +313,14 @@ def main():
     elif args.command == "scan":
         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         strategy = getattr(args, "strategy", "daily")
+        r24 = getattr(args, "r24_config", None)
         async def run_scan():
             api_key = os.environ.get("BINANCE_API_KEY", "")
             api_secret = os.environ.get("BINANCE_API_SECRET", "")
             if strategy == "both":
                 runner = DualPaperRunner(
-                    _load_config("daily"), _load_config("rolling"),
+                    _load_config("daily"),
+                    _load_config("rolling", r24),
                     api_key=api_key, api_secret=api_secret,
                 )
                 await runner.client.__aenter__()
@@ -322,7 +328,10 @@ def main():
                 await runner.rolling_scanner.scan()
                 await runner.client.__aexit__(None, None, None)
             else:
-                runner = PaperRunner(_load_config(strategy), api_key=api_key, api_secret=api_secret)
+                runner = PaperRunner(
+                    _load_config(strategy, r24 if strategy == "rolling" else None),
+                    api_key=api_key, api_secret=api_secret,
+                )
                 await runner.client.__aenter__()
                 await runner.scanner.scan()
                 await runner.client.__aexit__(None, None, None)

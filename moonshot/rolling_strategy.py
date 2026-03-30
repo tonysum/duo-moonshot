@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
-from moonshot.models import AmplitudeTrade
-from moonshot.sizing import PositionSizingMode, compute_order_margin as _compute_order_margin
 from moonshot.data_feed import DataFeed
+from moonshot.models import AmplitudeTrade
+from moonshot.sizing import PositionSizingMode
+from moonshot.sizing import compute_order_margin as _compute_order_margin
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ class RollingConfig:
     # free_cash_pct | equity_pct | fixed_usd（见 MoonshotConfig 注释）
     position_sizing_mode: PositionSizingMode = "free_cash_pct"
     position_size_ratio: float = 0.08
-    fixed_invest_usd: Optional[float] = None
+    fixed_invest_usd: float | None = None
     max_positions: int = 8
     leverage: int = 3
     max_hold_days: int = 7
@@ -82,7 +82,7 @@ class RollingConfig:
 class RollingStrategy:
     """Moonshot-R24 — hourly rolling 24h top gainer short strategy."""
 
-    def __init__(self, config: Optional[RollingConfig] = None):
+    def __init__(self, config: RollingConfig | None = None):
         self.config = config or RollingConfig()
         self.last_signal_details = []
         self.last_gate_details = {}
@@ -91,7 +91,7 @@ class RollingStrategy:
         self,
         feed: DataFeed,
         dt: datetime,
-        preloaded_gainers: Optional[dict] = None,
+        preloaded_gainers: dict | None = None,
     ) -> list[tuple[str, float]]:
         """Select signals from hourly top gainers.
 
@@ -160,7 +160,7 @@ class RollingStrategy:
         pct_chg: float,
         feed: DataFeed,
         signal_dt: datetime,
-        open_positions: Optional[list] = None,
+        open_positions: list | None = None,
     ) -> tuple[bool, str, int]:
         """Check entry gates. Returns (accept, reason, delay_hours). delay_hours always 0."""
         cfg = self.config
@@ -197,7 +197,7 @@ class RollingStrategy:
         self,
         trade: AmplitudeTrade,
         hold_hours: float,
-        session_low: Optional[float] = None,
+        session_low: float | None = None,
     ) -> float:
         """与 check_exit 固定止盈段一致（供 runner 歧义 K 线检测）；R24 忽略 session_low。"""
         _ = session_low
@@ -216,7 +216,7 @@ class RollingStrategy:
         current_price: float,
         current_time: datetime,
         hold_hours: float,
-    ) -> Optional[tuple[str, float]]:
+    ) -> tuple[str, float] | None:
         """Check exit conditions — identical to Moonshot."""
         cfg = self.config
         entry_price = trade.entry_price
@@ -262,14 +262,14 @@ class RollingStrategy:
     def check_dynamic_ratio_sl(
         self,
         trade: AmplitudeTrade,
-        current_ratio: Optional[float],
+        current_ratio: float | None,
         current_time: datetime,
         current_price: float,
-    ) -> Optional[tuple[str, float]]:
+    ) -> tuple[str, float] | None:
         cfg = self.config
         if not cfg.enable_dynamic_ratio_sl:
             return None
-        data_start = datetime.strptime(cfg.ratio_data_start, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+        data_start = datetime.strptime(cfg.ratio_data_start, '%Y-%m-%d').replace(tzinfo=UTC)
         if current_time < data_start or trade.entry_account_ratio is None or current_ratio is None:
             return None
         if current_ratio - trade.entry_account_ratio <= cfg.ratio_change_threshold:

@@ -12,13 +12,18 @@ import logging
 import math
 import statistics
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Optional
 
-from moonshot.models import AmplitudeTrade, RunResult, is_win_result, is_loss_result, derive_exit_reason
-from moonshot.rolling_data_feed import RollingDataFeed
 from moonshot.account import Account
+from moonshot.models import (
+    AmplitudeTrade,
+    RunResult,
+    derive_exit_reason,
+    is_loss_result,
+    is_win_result,
+)
+from moonshot.rolling_data_feed import RollingDataFeed
 from moonshot.rolling_strategy import RollingStrategy
 
 logger = logging.getLogger(__name__)
@@ -363,8 +368,8 @@ class RollingRunner:
         self,
         trades: list[AmplitudeTrade],
         duration: float,
-        start: Optional[datetime] = None,
-        end: Optional[datetime] = None,
+        start: datetime | None = None,
+        end: datetime | None = None,
     ) -> RunResult:
         active = [t for t in trades if t.result != "cancelled"]
         wins = [t for t in active if t.profit_amount is not None and t.profit_amount > 0]
@@ -413,7 +418,7 @@ class RollingRunner:
         max_consec_pct = 0.0
         cur_streak = 0
         cur_streak_pct = 0.0
-        for t in sorted(active, key=lambda x: x.entry_time or datetime.min.replace(tzinfo=timezone.utc)):
+        for t in sorted(active, key=lambda x: x.entry_time or datetime.min.replace(tzinfo=UTC)):
             is_loss = is_loss_result(t.result) or (t.result == "timeout" and (t.profit_amount or 0) <= 0)
             is_w = is_win_result(t.result) or (t.result == "timeout" and (t.profit_amount or 0) > 0)
             if is_loss:
@@ -500,7 +505,8 @@ class RollingRunner:
 
     def print_summary(self, result: RunResult) -> None:
         """Print a clean summary to stdout."""
-        inf = lambda v: "∞" if v >= 99 else f"{v:.2f}"
+        def inf(v):
+            return "∞" if v >= 99 else f"{v:.2f}"
         net_pnl = result.final_capital - result.initial_capital
         fees_pct = round(self._account.total_fees_pct, 3)
         W = 60

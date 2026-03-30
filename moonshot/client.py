@@ -1,14 +1,14 @@
 """Simplified Binance Futures Client for Moonshot Paper Trading.
 """
 
-import hmac
 import hashlib
+import hmac
 import time
-import httpx
-from decimal import Decimal
-from typing import Any, Optional, Union
 from urllib.parse import urlencode
+
+import httpx
 from pydantic import BaseModel, Field
+
 
 class SymbolInfo(BaseModel):
     symbol: str
@@ -26,7 +26,7 @@ class Kline(BaseModel):
     low: str
     close: str
     quote_asset_volume: str
-    
+
     @classmethod
     def from_array(cls, data: list):
         return cls(open_time=data[0], open=data[1], high=data[2], low=data[3], close=data[4], quote_asset_volume=data[7])
@@ -50,7 +50,7 @@ class BinanceFuturesClient:
     def __init__(self, api_key: str = "", secret_key: str = ""):
         self.api_key = api_key
         self.secret_key = secret_key
-        self._client: Optional[httpx.AsyncClient] = None
+        self._client: httpx.AsyncClient | None = None
 
     async def __aenter__(self):
         self._client = httpx.AsyncClient(base_url=self.BASE_URL, headers={"X-MBX-APIKEY": self.api_key} if self.api_key else {})
@@ -65,7 +65,7 @@ class BinanceFuturesClient:
             params["timestamp"] = int(time.time() * 1000)
             query = urlencode(params)
             params["signature"] = hmac.new(self.secret_key.encode(), query.encode(), hashlib.sha256).hexdigest()
-        
+
         resp = await self._client.request(method, endpoint, params=params)
         resp.raise_for_status()
         return resp.json()

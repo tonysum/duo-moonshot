@@ -16,6 +16,7 @@ from moonshot.rolling_data_feed import RollingDataFeed
 from moonshot.account import Account
 from moonshot.rolling_strategy import RollingStrategy, RollingConfig
 from moonshot.rolling_runner import RollingRunner
+from moonshot.r24_config_load import load_rolling_config
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("moonshot-r24")
@@ -68,6 +69,16 @@ def main():
         help="Scan interval hours (default: RollingConfig.scan_interval_hours, e.g. 4=every 4h)",
     )
     parser.add_argument("--workers", type=int, default=0, help="Parallel workers for data loading (0=auto)")
+    parser.add_argument(
+        "--config",
+        default=None,
+        metavar="PATH",
+        help=(
+            "R24 params JSON (optional). Default: MOONSHOT_R24_PARAMS env, then "
+            "(moonshot package parent, then cwd) × "
+            "config/r24_params.json → reports/optimizer/r24_phase3_best.json, else code defaults."
+        ),
+    )
     parser.add_argument("--no-csv", action="store_true", help="Skip CSV export")
     parser.add_argument(
         "--sizing",
@@ -90,7 +101,7 @@ def main():
 
     args = parser.parse_args()
 
-    base = RollingConfig()
+    base = load_rolling_config(args.config)
     cfg = replace(
         base,
         top_n=args.top_n if args.top_n is not None else base.top_n,

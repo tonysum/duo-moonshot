@@ -6,23 +6,22 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
-from fastapi import FastAPI, BackgroundTasks, Query
-from fastapi.middleware.cors import CORSMiddleware
-from datetime import datetime, timezone
 
+from fastapi import BackgroundTasks, FastAPI, Query
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
-from typing import Optional
 
-from moonshot.paper.runner import PaperRunner, DualPaperRunner
+from moonshot.paper.runner import DualPaperRunner, PaperRunner
 from moonshot.paper.trades_csv import build_trades_csv
 from moonshot.rolling_strategy import RollingConfig
 
 logger = logging.getLogger(__name__)
 
 # Registered by __main__.py
-_runner: Optional[PaperRunner | DualPaperRunner] = None
+_runner: PaperRunner | DualPaperRunner | None = None
 
 
 def _is_dual_run() -> bool:
@@ -90,7 +89,7 @@ async def get_status():
     }
 
 @app.get("/positions")
-async def get_positions(strategy: Optional[str] = Query(None, description="daily|rolling (dual mode only)")):
+async def get_positions(strategy: str | None = Query(None, description="daily|rolling (dual mode only)")):
     if not _runner:
         return [] if not _is_dual_run() else {"daily": [], "rolling": []}
 
@@ -128,7 +127,7 @@ async def get_positions(strategy: Optional[str] = Query(None, description="daily
     return await _enrich(positions)
 
 @app.get("/trades")
-async def get_trades(limit: int = 50, strategy: Optional[str] = Query(None, description="daily|rolling (dual mode only)")):
+async def get_trades(limit: int = 50, strategy: str | None = Query(None, description="daily|rolling (dual mode only)")):
     if not _runner:
         return [] if not _is_dual_run() else {"daily": [], "rolling": []}
     if _is_dual_run():
@@ -143,7 +142,7 @@ async def get_trades(limit: int = 50, strategy: Optional[str] = Query(None, desc
     return _runner.store.get_trades(limit=limit)
 
 @app.get("/logs")
-async def get_logs(limit: int = 100, strategy: Optional[str] = Query(None, description="daily|rolling (dual mode only)")):
+async def get_logs(limit: int = 100, strategy: str | None = Query(None, description="daily|rolling (dual mode only)")):
     if not _runner:
         return []
     if _is_dual_run():
@@ -163,7 +162,7 @@ async def get_logs(limit: int = 100, strategy: Optional[str] = Query(None, descr
     return _runner.store.get_events(limit=limit)
 
 @app.get("/equity")
-async def get_equity(strategy: Optional[str] = Query(None, description="daily|rolling (dual mode only)")):
+async def get_equity(strategy: str | None = Query(None, description="daily|rolling (dual mode only)")):
     if not _runner:
         return [] if not _is_dual_run() else {"daily": [], "rolling": []}
     if _is_dual_run():
@@ -188,7 +187,7 @@ async def stop_runner():
     return {"message": "Stopped"}
 
 @app.post("/scan")
-async def trigger_scan(background_tasks: BackgroundTasks, strategy: Optional[str] = Query(None)):
+async def trigger_scan(background_tasks: BackgroundTasks, strategy: str | None = Query(None)):
     if not _runner:
         return {"message": "Runner not started"}
     if _is_dual_run():
@@ -204,7 +203,7 @@ async def trigger_scan(background_tasks: BackgroundTasks, strategy: Optional[str
     return {"message": "Scan scheduled"}
 
 @app.get("/pending_st")
-async def get_pending_st(strategy: Optional[str] = Query(None)):
+async def get_pending_st(strategy: str | None = Query(None)):
     if not _runner:
         return []
     if _is_dual_run():
@@ -260,7 +259,7 @@ async def get_top_gainers():
     return _top_gainers_cache["data"]
 
 @app.get("/scan_results")
-async def get_scan_results(strategy: Optional[str] = Query(None, description="daily|rolling (dual mode only)")):
+async def get_scan_results(strategy: str | None = Query(None, description="daily|rolling (dual mode only)")):
     """Return last scan snapshot (gainers + filter status)."""
     if not _runner:
         return None
@@ -425,7 +424,7 @@ async def stream_data():
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 @app.get("/summary")
-async def get_summary(strategy: Optional[str] = Query(None, description="daily|rolling (dual mode only)")):
+async def get_summary(strategy: str | None = Query(None, description="daily|rolling (dual mode only)")):
     """Compute aggregated performance metrics from all closed trades."""
     if not _runner:
         return {"error": "Runner not initialized"}
@@ -450,7 +449,7 @@ async def get_summary(strategy: Optional[str] = Query(None, description="daily|r
     return await _summary_for_store(store, account)
 
 
-def _parse_trade_iso(s: Optional[str]):
+def _parse_trade_iso(s: str | None):
     """解析成交记录里的 ISO 时间；与 trades 条数对齐时须保证每条都有占位，避免 zip 错位。"""
     if not s:
         return None
@@ -580,7 +579,7 @@ async def _summary_for_store(store, account):
 
 @app.get("/export/trades.csv")
 async def export_paper_trades_csv(
-    strategy: Optional[str] = Query(None, description="dual 模式必填: daily | rolling"),
+    strategy: str | None = Query(None, description="dual 模式必填: daily | rolling"),
     include_summary: bool = Query(True, description="是否在表尾附加 Summary 段"),
 ):
     """已平仓明细 CSV，列与 `moonshot/runner.py` / `rolling_runner.py` 的 export_csv 一致（UTF-8 BOM）。"""
@@ -628,7 +627,7 @@ async def export_paper_trades_csv(
         include_summary=bool(include_summary and summary_lines),
         summary_lines=summary_lines,
     )
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     filename = f"{fname_prefix}_trades_{ts}.csv"
     return Response(
         content=body,
@@ -638,8 +637,8 @@ async def export_paper_trades_csv(
 
 
 # ── Static file serving (production frontend) ────────────────────
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 _FRONTEND_DIR = Path(__file__).parent / "frontend" / "dist"
 

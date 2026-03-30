@@ -3,6 +3,7 @@
 
 import asyncio
 import logging
+
 from moonshot.client import BinanceFuturesClient
 from moonshot.paper.live_feed import LiveFeed
 
@@ -12,11 +13,11 @@ logger = logging.getLogger(__name__)
 async def test_live_feed():
     async with BinanceFuturesClient() as client:
         feed = LiveFeed(client)
-        
+
         logger.info("1. Testing get_usdt_symbols...")
         symbols = await feed.get_usdt_symbols()
         logger.info(f"   Found {len(symbols)} symbols. Example: {symbols[:5]}")
-        
+
         if not symbols:
             logger.error("No symbols found. Check internet or API.")
             return
@@ -30,7 +31,7 @@ async def test_live_feed():
         avg_30d = await feed.load_30d_avg_price(test_sym)
         logger.info(f"   {test_sym} 30d avg: {avg_30d}")
 
-        logger.info(f"4. Testing daily top gainers scan (top 5)...")
+        logger.info("4. Testing daily top gainers scan (top 5)...")
         gainers = await feed.scan_daily_top_gainers(min_pct_chg=1.0, top_n=5)
         logger.info(f"   Top gainers: {gainers}")
 

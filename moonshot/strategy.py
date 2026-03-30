@@ -5,12 +5,12 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
-from moonshot.models import AmplitudeTrade
-from moonshot.sizing import PositionSizingMode, compute_order_margin as _compute_order_margin
 from moonshot.data_feed import DataFeed
+from moonshot.models import AmplitudeTrade
+from moonshot.sizing import PositionSizingMode
+from moonshot.sizing import compute_order_margin as _compute_order_margin
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ class MoonshotConfig:
     top_n: int = 3                        # 每日最多选择涨幅前 N 名
     min_pct_chg: float = 10.0             # 最小涨幅要求 10%
     min_listed_days: int = 10              # 新币过滤
-    
+
     enable_main_profit_check: bool = True     # 结合30日均线的“主力获利”检查
     # (涨幅上限%, 30日均价涨幅阈值%)
     main_profit_thresholds: list = field(default_factory=lambda: [
@@ -47,7 +47,7 @@ class MoonshotConfig:
     #   fixed_usd     — 每笔固定保证金 fixed_invest_usd（不得超过剩余现金）
     position_sizing_mode: PositionSizingMode = "free_cash_pct"
     position_size_ratio: float = 0.04      # 用于 free_cash_pct / equity_pct
-    fixed_invest_usd: Optional[float] = None  # fixed_usd 模式下的固定保证金
+    fixed_invest_usd: float | None = None  # fixed_usd 模式下的固定保证金
     max_positions: int = 7                # 最大同时持仓
     leverage: int = 2                     # 固定杠杆 1x
     max_hold_days: int = 11               # 超时强制平仓天数
@@ -66,7 +66,7 @@ class MoonshotConfig:
     enable_trailing_take_profit: bool = True
     trailing_activation_pct: float = 0.16     # 浮盈≥该比例(相对入场价)后激活
     trailing_distance_pct: float = 0.09       # 自持仓以来最低价向上反弹该比例则平仓
-    
+
     # Dynamic Stop Loss
     enable_dynamic_ratio_sl: bool = False
     ratio_change_threshold: float = -0.18     # 多空比下降 ≥ 18% → 止损
@@ -81,12 +81,12 @@ class MoonshotConfig:
 class MoonshotStrategy:
     """Moonshot — simplified daily top gainer short strategy."""
 
-    def __init__(self, config: Optional[MoonshotConfig] = None):
+    def __init__(self, config: MoonshotConfig | None = None):
         self.config = config or MoonshotConfig()
         self.last_signal_details = []
         self.last_gate_details = {}
 
-    def select_signals(self, feed: DataFeed, date: datetime, preloaded_gainers: Optional[dict] = None) -> list[tuple[str, float]]:
+    def select_signals(self, feed: DataFeed, date: datetime, preloaded_gainers: dict | None = None) -> list[tuple[str, float]]:
         self.last_signal_details = []
         if preloaded_gainers is not None:
             gainers = preloaded_gainers.get(date.strftime('%Y-%m-%d'), [])[:self.config.top_n]
@@ -108,7 +108,8 @@ class MoonshotStrategy:
                         detail['listed_days'] = days_listed
                         if days_listed < self.config.min_listed_days:
                             detail['filter_result'] = '剔除:上市天数不足'
-                            self.last_signal_details.append(detail); continue
+                            self.last_signal_details.append(detail); 
+                            continue
 
                 if self.config.enable_main_profit_check:
                     avg_price = feed.load_30d_avg_price(symbol, date)
@@ -120,7 +121,8 @@ class MoonshotStrategy:
                             detail.update({'avg_price_30d': avg_price, 'close_1d': current_close, 'from_avg_pct': from_avg_pct, 'profit_threshold': threshold})
                             if from_avg_pct < threshold:
                                 detail['filter_result'] = '剔除:主力未获利'
-                                self.last_signal_details.append(detail); continue
+                                self.last_signal_details.append(detail); 
+                                continue
 
                 self.last_signal_details.append(detail)
                 results.append((symbol, pct_chg))
@@ -129,7 +131,7 @@ class MoonshotStrategy:
                 self.last_signal_details.append(detail)
         return results
 
-    def should_enter(self, symbol: str, pct_chg: float, feed: DataFeed, signal_date: datetime, open_positions: Optional[list] = None) -> tuple[bool, str, int]:
+    def should_enter(self, symbol: str, pct_chg: float, feed: DataFeed, signal_date: datetime, open_positions: list | None = None) -> tuple[bool, str, int]:
         cfg = self.config
         self.last_gate_details = {'ratio': None, 'volume_100m': None}
 
@@ -139,7 +141,7 @@ class MoonshotStrategy:
         if cfg.min_listed_days > 0:
             listing_date = feed.load_listing_date(symbol)
             if listing_date and (signal_date - listing_date).days < cfg.min_listed_days:
-                return False, f"新币过滤", 0
+                return False, "新币过滤", 0
 
         if cfg.enable_main_profit_check:
             avg_price = feed.load_30d_avg_price(symbol, signal_date)
@@ -148,20 +150,22 @@ class MoonshotStrategy:
                 if current_close and current_close > 0:
                     from_avg = (current_close - avg_price) / avg_price * 100
                     threshold = self._get_main_profit_threshold(pct_chg)
-                    if from_avg < threshold: return False, f"主力未获利", 0
+                    if from_avg < threshold: 
+                        return False, "主力未获利", 0
 
         return True, "即时建仓", 0
 
     def _get_main_profit_threshold(self, pct_chg: float) -> float:
         for max_pct, threshold in self.config.main_profit_thresholds:
-            if pct_chg < max_pct: return threshold
+            if pct_chg < max_pct: 
+                return threshold
         return self.config.main_profit_thresholds[-1][1]
 
     def resolve_tp_threshold(
         self,
         trade: AmplitudeTrade,
         hold_hours: float,
-        session_low: Optional[float] = None,
+        session_low: float | None = None,
     ) -> float:
         """当前固定止盈比例（不含追踪）；`session_low` 保留签名供 runner 歧义 K 线调用，此处不使用。"""
         _ = session_low
@@ -172,8 +176,9 @@ class MoonshotStrategy:
             return cfg.tp_reduced
         return cfg.tp_initial
 
-    def check_exit(self, trade: AmplitudeTrade, candle_high: float, candle_low: float, current_price: float, current_time: datetime, hold_hours: float) -> Optional[tuple[str, float]]:
-        cfg = self.config; entry_price = trade.entry_price
+    def check_exit(self, trade: AmplitudeTrade, candle_high: float, candle_low: float, current_price: float, current_time: datetime, hold_hours: float) -> tuple[str, float] | None:
+        cfg = self.config; 
+        entry_price = trade.entry_price
         if not entry_price or entry_price <= 0:
             return None
 
@@ -208,11 +213,13 @@ class MoonshotStrategy:
             trade.lowest_price = candle_low
         return None
 
-    def check_dynamic_ratio_sl(self, trade: AmplitudeTrade, current_ratio: Optional[float], current_time: datetime, current_price: float) -> Optional[tuple[str, float]]:
+    def check_dynamic_ratio_sl(self, trade: AmplitudeTrade, current_ratio: float | None, current_time: datetime, current_price: float) -> tuple[str, float] | None:
         cfg = self.config
-        if not cfg.enable_dynamic_ratio_sl: return None
-        data_start = datetime.strptime(cfg.ratio_data_start, '%Y-%m-%d').replace(tzinfo=timezone.utc)
-        if current_time < data_start or trade.entry_account_ratio is None or current_ratio is None: return None
+        if not cfg.enable_dynamic_ratio_sl: 
+            return None
+        data_start = datetime.strptime(cfg.ratio_data_start, '%Y-%m-%d').replace(tzinfo=UTC)
+        if current_time < data_start or trade.entry_account_ratio is None or current_ratio is None: 
+            return None
         if current_ratio - trade.entry_account_ratio <= cfg.ratio_change_threshold:
             trade.exit_account_ratio, trade.account_ratio_change = current_ratio, current_ratio - trade.entry_account_ratio
             return "dynamic_ratio_sl", current_price
