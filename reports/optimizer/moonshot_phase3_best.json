@@ -1,0 +1,23 @@
+{
+  "phase": 3,
+  "score": 20917.723837617974,
+  "params": {
+    "top_n": 4,
+    "min_pct_chg": 25.0,
+    "min_listed_days": 10,
+    "tp_initial": 0.14,
+    "sl_threshold": 0.26,
+    "tp_reduced": 0.19999999999999998,
+    "tp_hours_threshold": 14,
+    "trailing_activation_pct": 0.22,
+    "trailing_distance_pct": 0.12000000000000001,
+    "add_position_threshold": 0.22,
+    "tp_after_add": 0.36,
+    "leverage": 2,
+    "max_positions": 8,
+    "position_size_ratio": 0.06,
+    "max_hold_days": 7,
+    "position_sizing_mode": "free_cash_pct",
+    "fixed_invest_usd": null
+  }
+}

@@ -1,18 +1,14 @@
-"""CLI Entrypoint for Duo-Moonshot Paper Trading.
+"""CLI Entrypoint for Duo-Moonshot Paper Trading (raw-surge only).
 
 Commands:
   start     Start the paper trading server (API + runner)
-  status    Show capital / positions / trade count (--dual | --store daily|rolling)
-  positions Show open positions (--dual | --store …)
-  trades    Show recent closed trades (--dual | --store …)
-  logs      Show recent system events (--dual | --store …)
-  summary   Show performance summary (--dual | --store …)
-  scan      Trigger a manual scan (daily or R24)
+  status    Show capital / positions / trade count
+  positions Show open positions
+  trades    Show recent closed trades
+  logs      Show recent system events
+  summary   Show performance summary
+  scan      Trigger a manual scan
   reset     Reset paper trading (clear all data)
-
-Strategies:
-  daily     Moonshot daily scan at 00:05 UTC (default)
-  rolling   R24 hourly 24h-rolling top gainer scan
 """
 
 import argparse
@@ -24,68 +20,51 @@ import uvicorn
 from dotenv import load_dotenv
 
 from moonshot.paper import api
-from moonshot.paper.runner import DualPaperRunner, PaperRunner
-from moonshot.r24_config_load import load_rolling_config
-from moonshot.strategy import MoonshotConfig
+from moonshot.paper.runner import PaperRunner
+from moonshot.r24_raw_surge_config_load import load_raw_surge_r24_config
 
 
-def _cli_db_lanes(args) -> list[tuple[str, str]]:
-    """Resolve which SQLite DB(s) to read: list of (section_title, path)."""
-    if getattr(args, "dual", False):
-        return [
-            ("Daily", "paper_trading_daily.db"),
-            ("Rolling", "paper_trading_rolling.db"),
-        ]
-    s = getattr(args, "store", None)
-    if s == "daily":
-        return [("Daily", "paper_trading_daily.db")]
-    if s == "rolling":
-        return [("Rolling", "paper_trading_rolling.db")]
+def _cli_db_lanes(_args) -> list[tuple[str, str]]:
     return [("", "paper_trading.db")]
 
 
-def _add_db_select_args(p):
-    """Mutually exclusive: --dual (both lanes) vs --store daily|rolling."""
-    g = p.add_mutually_exclusive_group()
-    g.add_argument(
-        "--dual",
-        action="store_true",
-        help="Use daily + rolling DBs (paper_trading_daily.db + paper_trading_rolling.db)",
-    )
-    g.add_argument(
-        "--store",
-        choices=["daily", "rolling"],
-        metavar="WHICH",
-        help="Use one lane DB: daily or rolling",
-    )
-
-
-def _load_config(strategy: str, r24_config: str | None = None):
-    """Load config: MoonshotConfig (daily) or RollingConfig (rolling)."""
-    if strategy == "rolling":
-        return load_rolling_config(r24_config)
-    return MoonshotConfig()
+def _quiet_third_party_loggers() -> None:
+    """httpx/uvicorn 默认 INFO 刷屏；在 serve 前后都调用，避免 Uvicorn 重配后失效。"""
+    for name in (
+        "httpx",
+        "httpcore",
+        "httpcore.http11",
+        "httpcore.connection",
+        "uvicorn.access",
+    ):
+        logging.getLogger(name).setLevel(logging.WARNING)
 
 
 async def run_start(args):
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    _quiet_third_party_loggers()
     api_key = os.environ.get("BINANCE_API_KEY", "")
     api_secret = os.environ.get("BINANCE_API_SECRET", "")
 
-    r24 = getattr(args, "r24_config", None)
-    if args.strategy == "both":
-        config_daily = _load_config("daily")
-        config_rolling = _load_config("rolling", r24)
-        runner = DualPaperRunner(config_daily, config_rolling, api_key=api_key, api_secret=api_secret)
-    else:
-        config = _load_config(args.strategy, r24 if args.strategy == "rolling" else None)
-        runner = PaperRunner(config, api_key=api_key, api_secret=api_secret)
+    cfg_path = getattr(args, "config", None)
+    config = load_raw_surge_r24_config(cfg_path)
+    runner = PaperRunner(config, api_key=api_key, api_secret=api_secret)
 
     api._runner = runner
     await runner.start()
     try:
-        config_uvicorn = uvicorn.Config(api.app, host="0.0.0.0", port=args.port, log_level="info")
+        # 无超时则会在「仍有 SSE/长连接」时一直卡在 shutdown（需多次 Ctrl+C 或 kill）。
+        config_uvicorn = uvicorn.Config(
+            api.app,
+            host="0.0.0.0",
+            port=args.port,
+            log_level="info",
+            access_log=False,
+            timeout_graceful_shutdown=8,
+        )
         server = uvicorn.Server(config_uvicorn)
+        # Uvicorn 在 load/serving 时可能重配 loggers
+        _quiet_third_party_loggers()
         await server.serve()
     finally:
         await runner.stop()
@@ -100,9 +79,8 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="Examples:\n"
                "  python -m moonshot.paper start --port 8100\n"
-               "  python -m moonshot.paper status --dual\n"
-               "  python -m moonshot.paper summary --store rolling\n"
-               "  python -m moonshot.paper trades --limit 10 --dual\n"
+               "  python -m moonshot.paper start --config config/r24_raw_surge_params.json\n"
+               "  python -m moonshot.paper trades --limit 10\n"
                "  python -m moonshot.paper reset --confirm\n"
     )
     sub = parser.add_subparsers(dest="command")
@@ -110,47 +88,38 @@ def main():
     # start
     p_start = sub.add_parser("start", help="Start paper trading server")
     p_start.add_argument("--port", type=int, default=8100)
-    p_start.add_argument("--strategy", choices=["daily", "rolling", "both"], default="daily",
-                        help="Strategy: daily, rolling, or both (parallel)")
     p_start.add_argument(
-        "--r24-config",
+        "--config",
         default=None,
         metavar="PATH",
-        help="R24 params JSON (rolling / both only); overrides MOONSHOT_R24_PARAMS and default search",
+        help="Raw-surge R24 params JSON; overrides MOONSHOT_R24_RAW_SURGE_PARAMS and default search",
     )
 
     # status
     p_status = sub.add_parser("status", help="Show capital and position count")
-    _add_db_select_args(p_status)
 
     # positions
     p_positions = sub.add_parser("positions", help="Show open positions")
-    _add_db_select_args(p_positions)
 
     # trades
     p_trades = sub.add_parser("trades", help="Show recent closed trades")
     p_trades.add_argument("--limit", type=int, default=20)
-    _add_db_select_args(p_trades)
 
     # logs
     p_logs = sub.add_parser("logs", help="Show recent events")
     p_logs.add_argument("--limit", type=int, default=30)
-    p_logs.add_argument("--type", type=str, default=None, help="Filter by event type (SCAN, OPEN, CLOSE, ADD)")
-    _add_db_select_args(p_logs)
+    p_logs.add_argument("--type", type=str, default=None, help="Filter by event type (SCAN, OPEN, CLOSE, ADD, RUN)")
 
     # summary
     p_summary = sub.add_parser("summary", help="Show performance summary")
-    _add_db_select_args(p_summary)
 
     # scan
     p_scan = sub.add_parser("scan", help="Trigger manual scan")
-    p_scan.add_argument("--strategy", choices=["daily", "rolling", "both"], default="daily",
-                       help="Strategy for scan")
     p_scan.add_argument(
-        "--r24-config",
+        "--config",
         default=None,
         metavar="PATH",
-        help="R24 params JSON (rolling / both only); same resolution as start",
+        help="Raw-surge params JSON; same resolution as start",
     )
 
     # reset
@@ -312,29 +281,18 @@ def main():
 
     elif args.command == "scan":
         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        strategy = getattr(args, "strategy", "daily")
-        r24 = getattr(args, "r24_config", None)
+        cfg_path = getattr(args, "config", None)
         async def run_scan():
             api_key = os.environ.get("BINANCE_API_KEY", "")
             api_secret = os.environ.get("BINANCE_API_SECRET", "")
-            if strategy == "both":
-                runner = DualPaperRunner(
-                    _load_config("daily"),
-                    _load_config("rolling", r24),
-                    api_key=api_key, api_secret=api_secret,
-                )
-                await runner.client.__aenter__()
-                await runner.daily_scanner.scan()
-                await runner.rolling_scanner.scan()
-                await runner.client.__aexit__(None, None, None)
-            else:
-                runner = PaperRunner(
-                    _load_config(strategy, r24 if strategy == "rolling" else None),
-                    api_key=api_key, api_secret=api_secret,
-                )
-                await runner.client.__aenter__()
-                await runner.scanner.scan()
-                await runner.client.__aexit__(None, None, None)
+            cfg = load_raw_surge_r24_config(cfg_path)
+            if not bool(getattr(cfg, "manual_scan_enabled", True)):
+                print("Manual scan disabled by config (manual_scan_enabled=false).")
+                return
+            runner = PaperRunner(cfg, api_key=api_key, api_secret=api_secret)
+            await runner.client.__aenter__()
+            await runner.scanner.scan()
+            await runner.client.__aexit__(None, None, None)
         asyncio.run(run_scan())
 
     elif args.command == "reset":
@@ -343,7 +301,7 @@ def main():
             print("   Run with --confirm to proceed.")
             return
         removed = 0
-        for db_path in ["paper_trading.db", "paper_trading_daily.db", "paper_trading_rolling.db"]:
+        for db_path in ["paper_trading.db"]:
             if os.path.exists(db_path):
                 os.remove(db_path)
                 removed += 1

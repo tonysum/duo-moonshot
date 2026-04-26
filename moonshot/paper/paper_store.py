@@ -39,6 +39,10 @@ class MoonshotPosition(BaseModel):
     entry_account_ratio: float | None = None
     exit_account_ratio: float | None = None
     account_ratio_change: float | None = None
+    entry_commission: float | None = None
+    add_price_raw: float | None = None
+    sell_surge_ratio: float | None = None
+    yesterday_avg_hour_sell_volume: float | None = None
 
 class PendingSignal(BaseModel):
     symbol: str
@@ -56,17 +60,21 @@ class PaperStore:
 
     def __init__(self, db_path: str = "paper_trading.db"):
         self.db_path = Path(db_path)
+        self._conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
         self._init_db()
 
     def _init_db(self):
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
+        conn = self._conn
+        with conn:
+            self._conn.execute("""
                 CREATE TABLE IF NOT EXISTS positions (
                     symbol TEXT PRIMARY KEY,
                     data TEXT
                 )
             """)
-            conn.execute("""
+            self._conn.execute("""
                 CREATE TABLE IF NOT EXISTS trades (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     symbol TEXT,
@@ -75,20 +83,20 @@ class PaperStore:
                     data TEXT
                 )
             """)
-            conn.execute("""
+            self._conn.execute("""
                 CREATE TABLE IF NOT EXISTS state (
                     key TEXT PRIMARY KEY,
                     value TEXT
                 )
             """)
-            conn.execute("""
+            self._conn.execute("""
                 CREATE TABLE IF NOT EXISTS equity (
                     timestamp TEXT PRIMARY KEY,
                     total_equity REAL,
                     cash REAL
                 )
             """)
-            conn.execute("""
+            self._conn.execute("""
                 CREATE TABLE IF NOT EXISTS events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp TEXT,
@@ -97,61 +105,110 @@ class PaperStore:
                     message TEXT
                 )
             """)
+            self._conn.execute("""
+                CREATE TABLE IF NOT EXISTS scan_signals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    scan_time TEXT,
+                    symbol TEXT,
+                    data TEXT
+                )
+            """)
 
     def save_position(self, pos: MoonshotPosition):
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("INSERT OR REPLACE INTO positions (symbol, data) VALUES (?, ?)", (pos.symbol, pos.model_dump_json()))
+        with self._conn:
+            self._conn.execute("INSERT OR REPLACE INTO positions (symbol, data) VALUES (?, ?)", (pos.symbol, pos.model_dump_json()))
 
     def remove_position(self, symbol: str):
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("DELETE FROM positions WHERE symbol = ?", (symbol,))
+        with self._conn:
+            self._conn.execute("DELETE FROM positions WHERE symbol = ?", (symbol,))
 
     def get_open_positions(self) -> list[MoonshotPosition]:
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute("SELECT data FROM positions")
+        with self._conn:
+            cursor = self._conn.execute("SELECT data FROM positions")
             return [MoonshotPosition.model_validate_json(row[0]) for row in cursor.fetchall()]
 
     def position_count(self) -> int:
-        with sqlite3.connect(self.db_path) as conn:
-            return conn.execute("SELECT COUNT(*) FROM positions").fetchone()[0]
+        with self._conn:
+            return self._conn.execute("SELECT COUNT(*) FROM positions").fetchone()[0]
 
     def add_trade(self, symbol: str, entry_time: str, exit_time: str, data: dict):
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("INSERT INTO trades (symbol, entry_time, exit_time, data) VALUES (?, ?, ?, ?)",
+        with self._conn:
+            self._conn.execute("INSERT INTO trades (symbol, entry_time, exit_time, data) VALUES (?, ?, ?, ?)",
                          (symbol, entry_time, exit_time, json.dumps(data)))
 
     def get_trades(self, limit: int = 50) -> list[dict]:
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute("SELECT data FROM trades ORDER BY id DESC LIMIT ?", (limit,))
+        with self._conn:
+            cursor = self._conn.execute("SELECT data FROM trades ORDER BY id DESC LIMIT ?", (limit,))
             return [json.loads(row[0]) for row in cursor.fetchall()]
 
     def get_trade_count(self) -> int:
-        with sqlite3.connect(self.db_path) as conn:
-            return conn.execute("SELECT COUNT(*) FROM trades").fetchone()[0]
+        with self._conn:
+            return self._conn.execute("SELECT COUNT(*) FROM trades").fetchone()[0]
+
+    def total_realized_pnl(self) -> float:
+        """已平仓合计净盈亏（与 trades 中 net_pnl 一致；全表 SUM，供看板高频读）。"""
+        with self._conn:
+            row = self._conn.execute(
+                """
+                SELECT COALESCE(SUM(CAST(COALESCE(json_extract(data, '$.net_pnl'), '0') AS REAL)), 0)
+                FROM trades
+                """
+            ).fetchone()
+        v = float(row[0]) if row and row[0] is not None else 0.0
+        return round(v, 2)
 
     def set_state(self, key: str, value: str):
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("INSERT OR REPLACE INTO state (key, value) VALUES (?, ?)", (key, value))
+        with self._conn:
+            self._conn.execute("INSERT OR REPLACE INTO state (key, value) VALUES (?, ?)", (key, value))
 
     def get_state(self, key: str) -> str | None:
-        with sqlite3.connect(self.db_path) as conn:
-            row = conn.execute("SELECT value FROM state WHERE key = ?", (key,)).fetchone()
+        with self._conn:
+            row = self._conn.execute("SELECT value FROM state WHERE key = ?", (key,)).fetchone()
             return row[0] if row else None
 
     def append_equity_snapshot(self, timestamp: str, total_equity: float, cash: float):
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("INSERT OR REPLACE INTO equity (timestamp, total_equity, cash) VALUES (?, ?, ?)",
+        with self._conn:
+            self._conn.execute("INSERT OR REPLACE INTO equity (timestamp, total_equity, cash) VALUES (?, ?, ?)",
                          (timestamp, total_equity, cash))
 
     def log_event(self, event_type: str, symbol: str, message: str):
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("INSERT INTO events (timestamp, event_type, symbol, message) VALUES (?, ?, ?, ?)",
+        with self._conn:
+            self._conn.execute("INSERT INTO events (timestamp, event_type, symbol, message) VALUES (?, ?, ?, ?)",
                          (datetime.now(UTC).isoformat(), event_type, symbol, message))
 
     def get_events(self, limit: int = 100) -> list[dict]:
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute("SELECT timestamp, event_type, symbol, message FROM events ORDER BY id DESC LIMIT ?", (limit,))
+        with self._conn:
+            cursor = self._conn.execute("SELECT timestamp, event_type, symbol, message FROM events ORDER BY id DESC LIMIT ?", (limit,))
             return [{"timestamp": r[0], "event_type": r[1], "symbol": r[2], "message": r[3]} for r in cursor.fetchall()]
+
+    def save_scan_signals(self, scan_time: str, details: list[dict]) -> None:
+        """按 scan_time 全量保存信号明细（覆盖同一 scan_time 的旧记录）。"""
+        with self._conn:
+            self._conn.execute("DELETE FROM scan_signals WHERE scan_time = ?", (scan_time,))
+            rows = [
+                (scan_time, str(d.get("symbol", "")), json.dumps(d, ensure_ascii=False))
+                for d in details
+            ]
+            self._conn.executemany(
+                "INSERT INTO scan_signals (scan_time, symbol, data) VALUES (?, ?, ?)",
+                rows,
+            )
+
+    def list_scan_times(self, limit: int = 50) -> list[str]:
+        with self._conn:
+            cursor = self._conn.execute(
+                "SELECT DISTINCT scan_time FROM scan_signals ORDER BY scan_time DESC LIMIT ?",
+                (limit,),
+            )
+            return [r[0] for r in cursor.fetchall()]
+
+    def get_scan_signals(self, scan_time: str, limit: int = 5000) -> list[dict]:
+        with self._conn:
+            cursor = self._conn.execute(
+                "SELECT data FROM scan_signals WHERE scan_time = ? ORDER BY symbol ASC LIMIT ?",
+                (scan_time, limit),
+            )
+            return [json.loads(r[0]) for r in cursor.fetchall()]
 
     def save_pending_signal(self, sig: PendingSignal):
         pending = self.get_pending_signals()
@@ -189,6 +246,6 @@ class PaperStore:
         return [PendingSupertrendSignal.model_validate(s) for s in json.loads(data)]
 
     def get_equity_curve(self) -> list[dict]:
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute("SELECT timestamp, total_equity, cash FROM equity ORDER BY timestamp ASC")
+        with self._conn:
+            cursor = self._conn.execute("SELECT timestamp, total_equity, cash FROM equity ORDER BY timestamp ASC")
             return [{"timestamp": r[0], "total_equity": r[1], "cash": r[2]} for r in cursor.fetchall()]

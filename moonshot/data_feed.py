@@ -15,14 +15,17 @@ from moonshot.models import Candle
 
 logger = logging.getLogger(__name__)
 
-_SYMBOL_RE = re.compile(r"^[A-Z0-9]+$")
+_SYMBOL_RE = re.compile(r"^[\u4e00-\u9fa5A-Z0-9]+$")
 
 
 def _validate_symbol(symbol: str) -> str:
-    """Validate and normalize symbol name to prevent SQL injection."""
+    """Validate and normalize symbol name to prevent SQL injection.
+    
+    支持中文、英文字母和数字。PostgreSQL 的 psycopg2.sql.Identifier 会正确处理 Unicode 表名。
+    """
     sym = symbol.upper()
     if not _SYMBOL_RE.match(sym):
-        raise ValueError(f"Invalid symbol {symbol!r}: must contain only A-Z and 0-9")
+        raise ValueError(f"Invalid symbol {symbol!r}: must contain only Chinese characters, A-Z and 0-9")
     return sym
 
 
@@ -165,6 +168,7 @@ class DataFeed:
             with self._db.conn.cursor() as cur:
                 cur.execute("SELECT table_name FROM information_schema.tables WHERE table_name LIKE 'K1d%'")
                 rows = cur.fetchall()
+            # 过滤掉非标准表名，保留中/英文+数字的交易对（如 BTCUSDT, 我踏马来了USDT）
             self._symbols_cache = sorted(r[0][3:] for r in rows if _SYMBOL_RE.match(r[0][3:]))
             return self._symbols_cache
         except Exception: return []

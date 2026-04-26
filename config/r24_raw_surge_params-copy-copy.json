@@ -1,0 +1,39 @@
+{
+  "params": {
+    "raw_min_sell_surge": 10.0,
+    "raw_max_signals_per_hour": null,
+
+    "rolling_window_hours": 24,
+    "scan_interval_hours": 2,
+    "signal_cooldown_hours": 8,
+    "top_n": 5,
+    "min_pct_chg": 10.0,
+    "min_listed_days": 10,
+
+    "enable_sell_surge_gate": false,
+    "sell_surge_threshold": 10.0,
+    "sell_surge_max": 10000.0,
+
+    "position_sizing_mode": "free_cash_pct",
+    "position_size_ratio": 0.08,
+    "fixed_invest_usd": null,
+    "max_positions": 8,
+    "leverage": 3,
+    "max_hold_days": 7,
+
+    "tp_initial": 0.16,
+    "tp_reduced": 0.08,
+    "tp_hours_threshold": 6,
+    "tp_after_add": 0.45,
+
+    "sl_threshold": 0.42,
+
+    "enable_trailing_stop": true,
+    "trailing_activation_pct": 0.08,
+    "trailing_distance_pct": 0.04,
+
+    "enable_add_position": true,
+    "add_position_threshold": 0.2,
+    "add_position_multiplier": 1.0
+  }
+}

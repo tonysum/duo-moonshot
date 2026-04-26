@@ -60,7 +60,8 @@ class RollingRunner:
             writer.writerow([
                 "信号时间", "交易对", "24h涨幅(%)", "信号价格",
                 "上市天数", "30日均价", "当日收盘", "均价偏离(%)",
-                "主力获利阈值(%)", "筛选结果", "门控结果",
+                "主力获利阈值(%)", "筛选结果", "卖量倍数", "昨日小时均卖",
+                "门控结果",
                 "多空比", "成交额(亿)", "延迟小时", "是否入场"
             ])
 
@@ -99,6 +100,8 @@ class RollingRunner:
                             cap = self._account.capital_at(c5.open_time)
                             if cap >= trade.position_size * exit_p:
                                 self._account.add_position_bt8(trade, exit_p, c5.open_time, cfg.add_position_multiplier)
+                                # 均价上移后沿用旧 lowest 会相对新 entry 夸大跌幅，误触发追踪；对齐本根 K 低点再判平仓
+                                trade.lowest_price = c5.low
                                 if self.verbose:
                                     logger.info("  补仓 %s @ %.4f avg=%.4f", symbol, exit_p, trade.entry_price)
                             recheck = self._strategy.check_exit(trade, c5.high, c5.low, c5.close, c5.open_time, hold_h)
@@ -174,74 +177,18 @@ class RollingRunner:
                         still_after_timeout.append(trade)
                 open_trades = still_after_timeout
 
-            # 3. Pending entries (Supertrend gate)
-            still_pending = []
-            for item in pending_entries:
-                symbol, target_dt = item['symbol'], item['target_date']
-                if current_dt < target_dt:
-                    still_pending.append(item)
-                    continue
-                if current_dt > target_dt + timedelta(hours=48):
-                    if self.verbose:
-                        logger.debug("  ⏳ %s pending signal expired after 48h", symbol)
-                    continue
-                if len(open_trades) >= cfg.max_positions or any(t.level == symbol for t in open_trades):
-                    still_pending.append(item)
-                    continue
-
-                st_tf = getattr(cfg, 'st_timeframe', '1h')
-                entry_p = None
-                entry_t = None
-                if cfg.enable_supertrend_gate:
-                    trend = self._feed.load_supertrend(symbol, current_dt, period=cfg.st_period, multiplier=cfg.st_multiplier, timeframe=st_tf)
-                    if trend == "bearish":
-                        candles = self._feed.load_1h(symbol, current_dt, current_dt) if st_tf == '1h' else self._feed.load_15m(symbol, current_dt, current_dt)
-                        if candles:
-                            entry_p = candles[0].close
-                            entry_t = current_dt
-                else:
-                    candles = self._feed.load_1h(symbol, current_dt, current_dt)
-                    if candles:
-                        entry_p = candles[0].close
-                        entry_t = current_dt
-
-                if entry_p:
-                    cap = self._account.capital_at(entry_t)
-                    total_equity = cap + sum(t.invest_amount for t in open_trades)
-                    invest = self._strategy.compute_order_margin(cap, total_equity)
-                    if 0 < invest <= cap:
-                        entry_ratio = self._feed.load_top_trader_ratio(symbol, entry_t) if cfg.enable_dynamic_ratio_sl else None
-                        trade = AmplitudeTrade(
-                            entry_time=item['signal_time'], entry_price=entry_p, base_price=entry_p,
-                            direction="short", level=symbol, target_pct=cfg.tp_initial * 100,
-                            target_price=entry_p * (1 - cfg.tp_initial), leverage=cfg.leverage,
-                            stop_loss_pct=cfg.sl_threshold * 100, stop_loss_price=entry_p * (1 + cfg.sl_threshold),
-                            status="filled", filled_time=entry_t, surge_pct=item['pct_chg'],
-                            signal_price=item['signal_price'], entry_reason=item['reason'],
-                            entry_account_ratio=entry_ratio,
-                            tp_initial_price=entry_p * (1 - cfg.tp_initial),
-                        )
-                        self._account.open_position_bt8(trade, invest, cfg.leverage)
-                        trade._add_position_multiplier = cfg.add_position_multiplier
-                        trades.append(trade)
-                        open_trades.append(trade)
-
-                        idx = item.get('sig_record_idx')
-                        if idx is not None and 0 <= idx < len(all_signals_history):
-                            all_signals_history[idx]['trade_ref'] = trade
-
-                        if self.verbose:
-                            logger.info("  🎯 R24 %s @ %.4f ratio=%.2f invest=%.0f", symbol, entry_p, entry_ratio or 0, invest)
-                else:
-                    still_pending.append(item)
-            pending_entries = still_pending
+            # PLACEHOLDER: Pending entries processing moved after signal scanning
 
             # 4. NEW SIGNALS — every scan_interval_hours (default: every hour)
             scan_interval = getattr(cfg, 'scan_interval_hours', 1) or 1
             is_scan_hour = (current_dt.hour % scan_interval == 0)
-            if is_scan_hour and len(open_trades) < cfg.max_positions:
-                _ = self._strategy.select_signals(self._feed, current_dt, hourly_gainers)
+            # 只计算在当前小时或之前到期的pending entries
+            expiring_pending = sum(1 for p in pending_entries if p['target_date'] <= current_dt)
+            if is_scan_hour and len(open_trades) + expiring_pending < cfg.max_positions:
+                prev_dt = current_dt - timedelta(hours=1)
+                _ = self._strategy.select_signals(self._feed, prev_dt, hourly_gainers)
 
+                immediate_accepted_this_hour = 0
                 for detail in getattr(self._strategy, 'last_signal_details', []):
                     symbol = detail['symbol']
                     pct_chg = detail['pct_chg']
@@ -273,7 +220,7 @@ class RollingRunner:
                         volume_100m = None
 
                     # Signal price from 1h candle
-                    candles_1h = self._feed.load_1h(symbol, current_dt, current_dt)
+                    candles_1h = self._feed.load_1h(symbol, prev_dt, prev_dt)
                     candle_price = candles_1h[0].close if candles_1h else 0.0
 
                     sig_record = {
@@ -287,6 +234,8 @@ class RollingRunner:
                         'from_avg_pct': detail['from_avg_pct'],
                         'profit_threshold': detail['profit_threshold'],
                         'filter_result': filter_result,
+                        'sell_surge_ratio': detail.get('sell_surge_ratio'),
+                        'yesterday_avg_hour_sell_volume': detail.get('yesterday_avg_hour_sell_volume'),
                         'is_pending': accept,
                         'reason': reason,
                         'delay_hours': delay_hours,
@@ -310,6 +259,8 @@ class RollingRunner:
                             round(sig_record['from_avg_pct'], 4) if sig_record['from_avg_pct'] is not None else "",
                             round(sig_record['profit_threshold'], 4) if sig_record['profit_threshold'] is not None else "",
                             sig_record['filter_result'],
+                            round(sig_record['sell_surge_ratio'], 4) if sig_record.get('sell_surge_ratio') is not None else "",
+                            round(sig_record['yesterday_avg_hour_sell_volume'], 2) if sig_record.get('yesterday_avg_hour_sell_volume') is not None else "",
                             sig_record['reason'] if sig_record['reason'] else "",
                             round(sig_record['ratio'], 4) if sig_record['ratio'] is not None else "",
                             round(sig_record['volume_100m'], 4) if sig_record['volume_100m'] is not None else "",
@@ -318,22 +269,121 @@ class RollingRunner:
                         ])
 
                     if accept:
+                        # Check total allocated positions - only count entries expiring in current hour
+                        expiring_pending = sum(1 for p in pending_entries if p['target_date'] <= current_dt)
+                        current_will_expire = 1 if delay_hours == 0 else 0
+                        # Also count other immediate signals accepted in this same scan hour
+                        if len(open_trades) + expiring_pending + current_will_expire + immediate_accepted_this_hour >= cfg.max_positions:
+                            continue
                         # Record cooldown
                         cooldown_tracker[symbol] = current_dt
+                        if delay_hours == 0:
+                            immediate_accepted_this_hour += 1
 
                         pending_entries.append({
                             'symbol': symbol,
                             'pct_chg': pct_chg,
-                            'target_date': current_dt + timedelta(hours=max(1, delay_hours)),
+                            'target_date': current_dt + timedelta(hours=delay_hours),
                             'reason': reason,
                             'signal_price': candle_price,
                             'signal_time': current_dt,
                             'sig_record_idx': len(all_signals_history) - 1,
+                            'sell_surge_ratio': detail.get('sell_surge_ratio'),
+                            'yesterday_avg_hour_sell_volume': detail.get('yesterday_avg_hour_sell_volume'),
                         })
                         if self.verbose:
-                            logger.info("  🔍 R24 %s signal (+%.1f%%), entry in %dh", symbol, pct_chg, max(1, delay_hours))
+                            logger.info("  🔍 R24 %s signal (+%.1f%%), entry in %dh", symbol, pct_chg, delay_hours)
                     elif self.verbose and reason and filter_result == '通过':
                         logger.debug("  ⛔ R24 Skip %s: %s", symbol, reason)
+
+            # Pending entries processing (now after signal scanning)
+            still_pending = []
+            remaining_slots = cfg.max_positions - len(open_trades)
+            for item in pending_entries:
+                symbol, target_dt = item['symbol'], item['target_date']
+                if current_dt < target_dt:
+                    still_pending.append(item)
+                    continue
+                if current_dt > target_dt + timedelta(hours=48):
+                    if self.verbose:
+                        logger.debug("  ⏳ %s pending signal expired after 48h", symbol)
+                    continue
+                # 检查是否已达到最大持仓容量（考虑所有活跃仓位）
+                if remaining_slots <= 0:
+                    still_pending.append(item)
+                    continue
+                # 检查是否已持有该symbol
+                if any(t.level == symbol for t in open_trades):
+                    still_pending.append(item)
+                    continue
+
+                st_tf = getattr(cfg, 'st_timeframe', '1h')
+                entry_p = None
+                entry_t = None
+                if cfg.enable_supertrend_gate:
+                    trend = self._feed.load_supertrend(symbol, current_dt, period=cfg.st_period, multiplier=cfg.st_multiplier, timeframe=st_tf)
+                    if trend == "bearish":
+                        candles_5m = self._feed.load_5m(symbol, current_dt, current_dt + timedelta(minutes=10))
+                        if len(candles_5m) >= 2:
+                            entry_p = candles_5m[1].open
+                            entry_t = candles_5m[1].open_time
+                        elif len(candles_5m) >= 1:
+                            entry_p = candles_5m[0].open
+                            entry_t = candles_5m[0].open_time
+                        else:
+                            # 后备：使用当前小时的1小时K线开盘价
+                            candles_1h = self._feed.load_1h(symbol, current_dt, current_dt)
+                            if candles_1h:
+                                entry_p = candles_1h[0].open
+                                entry_t = candles_1h[0].open_time
+                else:
+                    candles_5m = self._feed.load_5m(symbol, current_dt, current_dt + timedelta(minutes=10))
+                    if len(candles_5m) >= 2:
+                        entry_p = candles_5m[1].open
+                        entry_t = candles_5m[1].open_time
+                    elif len(candles_5m) >= 1:
+                        entry_p = candles_5m[0].open
+                        entry_t = candles_5m[0].open_time
+                    else:
+                        # 后备：使用当前小时的1小时K线开盘价
+                        candles_1h = self._feed.load_1h(symbol, current_dt, current_dt)
+                        if candles_1h:
+                            entry_p = candles_1h[0].open
+                            entry_t = candles_1h[0].open_time
+
+                if entry_p:
+                    cap = self._account.capital_at(entry_t)
+                    total_equity = cap + sum(t.invest_amount for t in open_trades)
+                    invest = self._strategy.compute_order_margin(cap, total_equity)
+                    if 0 < invest <= cap and remaining_slots > 0:
+                        entry_ratio = self._feed.load_top_trader_ratio(symbol, entry_t) if cfg.enable_dynamic_ratio_sl else None
+                        trade = AmplitudeTrade(
+                            entry_time=item['signal_time'], entry_price=entry_p, base_price=entry_p,
+                            direction="short", level=symbol, target_pct=cfg.tp_initial * 100,
+                            target_price=entry_p * (1 - cfg.tp_initial), leverage=cfg.leverage,
+                            stop_loss_pct=cfg.sl_threshold * 100, stop_loss_price=entry_p * (1 + cfg.sl_threshold),
+                            status="filled", filled_time=entry_t, surge_pct=item['pct_chg'],
+                            signal_price=item['signal_price'], entry_reason=item['reason'],
+                            entry_account_ratio=entry_ratio,
+                            tp_initial_price=entry_p * (1 - cfg.tp_initial),
+                            sell_surge_ratio=item.get('sell_surge_ratio'),
+                            yesterday_avg_hour_sell_volume=item.get('yesterday_avg_hour_sell_volume'),
+                        )
+                        self._account.open_position_bt8(trade, invest, cfg.leverage)
+                        trade._add_position_multiplier = cfg.add_position_multiplier
+                        trades.append(trade)
+                        open_trades.append(trade)
+                        remaining_slots -= 1  # 减少剩余仓位容量
+
+                        idx = item.get('sig_record_idx')
+                        if idx is not None and 0 <= idx < len(all_signals_history):
+                            all_signals_history[idx]['trade_ref'] = trade
+
+                        if self.verbose:
+                            logger.info("  🎯 R24 %s @ %.4f ratio=%.2f invest=%.0f", symbol, entry_p, entry_ratio or 0, invest)
+                else:
+                    still_pending.append(item)
+            pending_entries = still_pending
 
             current_dt += timedelta(hours=1)
 
@@ -569,7 +619,8 @@ class RollingRunner:
             writer = csv.writer(f)
             writer.writerow([
                 "信号时间", "信号价格", "建仓时间", "交易对",
-                "建仓价格", "24h涨幅", "仓位大小", "杠杆倍数",
+                "建仓价格", "24h涨幅", "卖量倍数", "昨日小时均卖",
+                "仓位大小", "杠杆倍数",
                 "止盈价(初始)", "止盈价(实际)", "止损价",
                 "开仓理由", "平仓时间", "平仓价格", "平仓原因",
                 "盈亏金额", "余额", "盈亏百分比", "持仓小时数",
@@ -588,6 +639,8 @@ class RollingRunner:
                     t.level,
                     t.entry_price,
                     t.surge_pct,
+                    round(t.sell_surge_ratio, 4) if t.sell_surge_ratio is not None else "",
+                    round(t.yesterday_avg_hour_sell_volume, 2) if t.yesterday_avg_hour_sell_volume is not None else "",
                     t.position_size,
                     t.leverage,
                     round(t.tp_initial_price, 8) if t.tp_initial_price else round(t.target_price, 8),
@@ -619,7 +672,8 @@ class RollingRunner:
                 writer.writerow([
                     "信号时间", "交易对", "24h涨幅(%)", "信号价格",
                     "上市天数", "30日均价", "当日收盘", "均价偏离(%)",
-                    "主力获利阈值(%)", "筛选结果", "门控结果",
+                    "主力获利阈值(%)", "筛选结果", "卖量倍数", "昨日小时均卖",
+                    "门控结果",
                     "多空比", "成交额(亿)", "延迟小时", "是否入场", "入场时间",
                     "入场价格", "退出原因", "持仓小时", "盈亏(%)",
                 ])
@@ -651,6 +705,8 @@ class RollingRunner:
                         round(s.get('from_avg_pct', 0), 4) if s.get('from_avg_pct') is not None else "",
                         round(s.get('profit_threshold', 0), 4) if s.get('profit_threshold') is not None else "",
                         s.get('filter_result', ''),
+                        round(s.get('sell_surge_ratio'), 4) if s.get('sell_surge_ratio') is not None else "",
+                        round(s.get('yesterday_avg_hour_sell_volume'), 2) if s.get('yesterday_avg_hour_sell_volume') is not None else "",
                         s.get('reason', ''),
                         round(s.get('ratio', 0), 4) if s.get('ratio') is not None else "",
                         round(s.get('volume_100m', 0), 4) if s.get('volume_100m') is not None else "",

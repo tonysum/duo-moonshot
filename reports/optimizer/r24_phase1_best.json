@@ -1,11 +1,13 @@
 {
   "phase": 1,
-  "score": 34669094.0976348,
+  "score": 0.0,
   "params": {
-    "rolling_window_hours": 42,
-    "scan_interval_hours": 2,
-    "signal_cooldown_hours": 4,
-    "top_n": 5,
-    "min_pct_chg": 22.5
+    "rolling_window_hours": 12,
+    "scan_interval_hours": 7,
+    "signal_cooldown_hours": 36,
+    "top_n": 2,
+    "min_pct_chg": 20.0,
+    "position_sizing_mode": "free_cash_pct",
+    "fixed_invest_usd": null
   }
 }

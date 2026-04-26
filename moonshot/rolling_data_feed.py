@@ -18,6 +18,7 @@ import psycopg2
 from psycopg2 import sql
 
 from moonshot.data_feed import DataFeed
+from moonshot.sell_surge_signal import sell_surge_ratio_at_scan_hour
 
 logger = logging.getLogger(__name__)
 
@@ -197,3 +198,12 @@ class RollingDataFeed(DataFeed):
         """Get preloaded hourly gainers for a specific hour."""
         key = dt.strftime('%Y-%m-%d %H:00')
         return self._hourly_gainers_cache.get(key, [])[:top_n]
+
+    def load_sell_surge_ratio(self, symbol: str, dt: datetime) -> float | None:
+        """Hour sell volume / (yesterday daily sell / 24) at ``dt``'s UTC hour; None if unavailable."""
+        ratio, _avg = sell_surge_ratio_at_scan_hour(self._db.conn, symbol, dt)
+        return ratio
+
+    def load_sell_surge_detail(self, symbol: str, dt: datetime) -> tuple[float | None, float | None]:
+        """Returns ``(surge_ratio, yesterday_avg_hour_sell_volume)`` for logging."""
+        return sell_surge_ratio_at_scan_hour(self._db.conn, symbol, dt)

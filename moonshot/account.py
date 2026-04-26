@@ -109,6 +109,10 @@ class Account:
         add_margin = add_size * add_price
 
         trade.avg_entry_price = trade.entry_price = new_avg
+        # 同步「硬止损价」到最新平均建仓价，避免 CSV/verify 用旧止损价导致误判。
+        # trade.stop_loss_pct 在 Runner 初始化时已按百分比设置（例如 16.0 表示 16%）。
+        if trade.stop_loss_pct is not None:
+            trade.stop_loss_price = trade.entry_price * (1 + trade.stop_loss_pct / 100)
         trade.position_size = total_size
         trade.invest_amount += add_margin
         trade.has_added_position, trade.add_position_price, trade.add_position_time = True, add_price, add_time

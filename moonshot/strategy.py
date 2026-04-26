@@ -192,7 +192,7 @@ class MoonshotStrategy:
             (cfg.tp_reduced if hold_hours >= cfg.tp_hours_threshold else cfg.tp_initial)
         )
 
-        if (candle_low - entry_price) / entry_price <= -tp_threshold:
+        if candle_low <= entry_price * (1 - tp_threshold):
             res = (
                 "tp_after_add" if trade.has_added_position else
                 ("tp_reduced" if hold_hours >= cfg.tp_hours_threshold else "tp_initial")

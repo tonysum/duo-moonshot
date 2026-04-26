@@ -7,20 +7,19 @@ from datetime import UTC, datetime
 from moonshot.paper.live_feed import LiveFeed
 from moonshot.paper.paper_account import PaperAccount
 from moonshot.paper.paper_store import MoonshotPosition, PaperStore
-from moonshot.rolling_strategy import RollingStrategy
-from moonshot.strategy import MoonshotStrategy
+from moonshot.r24_raw_surge_strategy import RawSurgeRollingStrategy
 
 logger = logging.getLogger(__name__)
 
 class PositionMonitor:
-    """Works with MoonshotStrategy or RollingStrategy (both share check_exit interface)."""
+    """Real-time exit checks for raw-surge paper positions."""
 
     def __init__(
         self,
         feed: LiveFeed,
         store: PaperStore,
         account: PaperAccount,
-        strategy: MoonshotStrategy | RollingStrategy,
+        strategy: RawSurgeRollingStrategy,
     ):
         self._feed = feed
         self._store = store
@@ -69,6 +68,14 @@ class PositionMonitor:
             await self._account.close_position(pos, current_price, now_dt.isoformat(), "timeout", feed=self._feed)
             return
 
+        # Liquidation approximation (paper realism): if (margin + unrealized_pnl) falls below maintenance threshold.
+        mmr = float(getattr(self._config, "maintenance_margin_rate", 0.0) or 0.0)
+        if mmr > 0:
+            margin_equity = float(pos.invest_amount) + float(pos.unrealized_pnl)
+            if margin_equity <= float(pos.invest_amount) * mmr:
+                await self._account.close_position(pos, current_price, now_dt.isoformat(), "liquidation", feed=self._feed)
+                return
+
         # 与回测一致：check_exit 需要「存续期内见过的」高/低价，而不是仅当前 tick。
         # 若只用 current_price 当作 candle_high/low，价位先触及 SL/TP 再回抽会在下一轮漏判。
         hi = pos.highest_price if pos.highest_price is not None else max(pos.entry_price, current_price)
@@ -77,12 +84,6 @@ class PositionMonitor:
             pos, candle_high=hi, candle_low=lo,
             current_price=current_price, current_time=now_dt, hold_hours=hold_hours
         )
-
-        if result is None and isinstance(self._strategy, MoonshotStrategy):
-            thr = self._strategy.resolve_tp_threshold(pos, hold_hours)
-            if pos.entry_price and pos.entry_price > 0:
-                pos.tp_price = pos.entry_price * (1 - thr)
-                pos.target_pct = thr * 100
 
         if result is None and self._config.enable_dynamic_ratio_sl:
             current_ratio = await self._feed.load_top_trader_ratio(symbol)
@@ -95,7 +96,8 @@ class PositionMonitor:
         exit_result, exit_price = result
 
         if exit_result == "add_position":
-            self._account.add_position(symbol, exit_price, now_dt.isoformat())
+            mult = float(getattr(self._config, "add_position_multiplier", 1.0) or 1.0)
+            self._account.add_position(symbol, exit_price, now_dt.isoformat(), multiplier=mult)
             return
 
         await self._account.close_position(pos, exit_price, now_dt.isoformat(), exit_result, feed=self._feed)

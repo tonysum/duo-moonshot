@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from moonshot.client import BinanceFuturesClient
@@ -101,18 +101,68 @@ class LiveFeed:
         self,
         min_pct_chg: float = 10.0,
         top_n: int = 3,
+        window_hours: int = 24,
     ) -> list[tuple[str, float]]:
-        """Scan for top N 24h rolling gainers via Binance 24hr ticker (single API call)."""
+        """Scan for top N rolling gainers.
+
+        window_hours=24: uses Binance 24hr ticker (single batch call, fast).
+        window_hours!=24: fetches 1h klines per symbol to compute exact rolling pct
+                          (consistent with backtest rolling_window_hours).
+        """
+        if window_hours == 24:
+            tradeable = set(await self.get_usdt_symbols())
+            tickers = await self._client.get_24hr_tickers()
+            usdt_perps = [
+                (t["symbol"], float(t.get("priceChangePercent", 0)))
+                for t in tickers
+                if t.get("symbol", "") in tradeable
+                and float(t.get("priceChangePercent", 0)) >= min_pct_chg
+            ]
+            usdt_perps.sort(key=lambda x: x[1], reverse=True)
+            return usdt_perps[:top_n]
+
+        # Custom window: pre-filter with 24hr ticker (single call), then fetch klines
+        # only for top candidates — avoids fetching klines for all ~300 symbols.
         tradeable = set(await self.get_usdt_symbols())
         tickers = await self._client.get_24hr_tickers()
-        usdt_perps = [
-            (t["symbol"], float(t.get("priceChangePercent", 0)))
+        ticker_pct: dict[str, float] = {
+            t["symbol"]: float(t.get("priceChangePercent", 0))
             for t in tickers
             if t.get("symbol", "") in tradeable
-            and float(t.get("priceChangePercent", 0)) >= min_pct_chg
-        ]
-        usdt_perps.sort(key=lambda x: x[1], reverse=True)
-        return usdt_perps[:top_n]
+        }
+        # Take all symbols whose 24hr pct meets the proxy threshold (lower than exact threshold
+        # to avoid missing symbols whose rolling pct differs from 24hr pct)
+        pre_candidates = sorted(
+            [(s, p) for s, p in ticker_pct.items() if p >= min_pct_chg * 0.6],
+            key=lambda x: x[1],
+            reverse=True,
+        )
+        symbols_to_check = [s for s, _ in pre_candidates]
+
+        semaphore = asyncio.Semaphore(20)
+        results: list[tuple[str, float]] = []
+
+        async def fetch_one(symbol: str):
+            async with semaphore:
+                try:
+                    klines = await self._client.get_klines(
+                        symbol=symbol, interval="1h", limit=window_hours + 1,
+                    )
+                    if len(klines) < window_hours + 1:
+                        return
+                    base_close = float(klines[0].close)
+                    curr_close = float(klines[-1].close)
+                    if base_close <= 0:
+                        return
+                    pct = (curr_close - base_close) / base_close * 100
+                    if pct >= min_pct_chg:
+                        results.append((symbol, pct))
+                except Exception:
+                    pass
+
+        await asyncio.gather(*[fetch_one(s) for s in symbols_to_check])
+        results.sort(key=lambda x: x[1], reverse=True)
+        return results[:top_n]
 
     async def load_30d_avg_price(self, symbol: str) -> float | None:
         try:
@@ -203,6 +253,115 @@ class LiveFeed:
             )
         except Exception:
             return None
+
+    async def load_1h_sell_quote(self, symbol: str, hour_dt: datetime) -> float | None:
+        """该 UTC 小时已完成 1h K 的主动卖出成交额（quote）。
+
+        近似：sell_quote = quote_total - taker_buy_quote
+        """
+        try:
+            h0 = hour_dt.replace(minute=0, second=0, microsecond=0, tzinfo=UTC)
+            start_ms = int(h0.timestamp() * 1000)
+            end_ms = start_ms + 3_600_000
+            klines = await self._client.get_klines(
+                symbol=symbol,
+                interval="1h",
+                start_time=start_ms,
+                end_time=end_ms,
+                limit=2,
+            )
+            if not klines:
+                return None
+            # 取该小时开始的那根（若返回两根，第一根应是 [start_ms, start_ms+1h)）
+            k = klines[0]
+            q_total = float(k.quote_asset_volume)
+            q_buy = float(k.taker_buy_quote_asset_volume)
+            return max(0.0, q_total - q_buy)
+        except Exception:
+            return None
+
+    async def load_1d_sell_quote(self, symbol: str, day_dt: datetime) -> float | None:
+        """某自然日（UTC 00:00 起）的已完成 1d K 主动卖出成交额（quote）。"""
+        try:
+            d0 = day_dt.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=UTC)
+            start_ms = int(d0.timestamp() * 1000)
+            end_ms = start_ms + 86_400_000
+            klines = await self._client.get_klines(
+                symbol=symbol,
+                interval="1d",
+                start_time=start_ms,
+                end_time=end_ms,
+                limit=2,
+            )
+            if not klines:
+                return None
+            k = klines[0]
+            q_total = float(k.quote_asset_volume)
+            q_buy = float(k.taker_buy_quote_asset_volume)
+            return max(0.0, q_total - q_buy)
+        except Exception:
+            return None
+
+    async def sell_surge_ratio_at_hour(
+        self, symbol: str, hour_dt: datetime
+    ) -> tuple[float | None, float | None]:
+        """返回 (sell_surge_ratio, yesterday_avg_hour_sell_quote)。"""
+        try:
+            h0 = hour_dt.replace(minute=0, second=0, microsecond=0, tzinfo=UTC)
+            sell_1h = await self.load_1h_sell_quote(symbol, h0)
+            if sell_1h is None:
+                return None, None
+
+            yday0 = (h0 - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+            sell_1d = await self.load_1d_sell_quote(symbol, yday0)
+            if sell_1d is None:
+                return None, None
+
+            yavg = sell_1d / 24.0
+            if yavg <= 0:
+                return None, yavg
+            return sell_1h / yavg, yavg
+        except Exception:
+            return None, None
+
+    async def scan_sell_surge_rank(
+        self,
+        hour_dt: datetime | None = None,
+        concurrency: int = 20,
+    ) -> list[dict]:
+        """返回所有 USDT 合约上一小时卖量倍数，降序排列，含 24hr 涨幅。
+
+        每条记录: {symbol, sell_surge_ratio, yesterday_avg_hour_sell_volume, pct_chg_24h}
+        """
+        if hour_dt is None:
+            now = datetime.now(UTC)
+            hour_dt = now.replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)
+
+        tradeable = set(await self.get_usdt_symbols())
+        tickers = await self._client.get_24hr_tickers()
+        pct_map: dict[str, float] = {
+            t["symbol"]: float(t.get("priceChangePercent", 0))
+            for t in tickers
+            if t.get("symbol", "") in tradeable
+        }
+
+        semaphore = asyncio.Semaphore(concurrency)
+        results: list[dict] = []
+
+        async def fetch_one(symbol: str):
+            async with semaphore:
+                sr, yavg = await self.sell_surge_ratio_at_hour(symbol, hour_dt)
+                if sr is not None and sr > 0:
+                    results.append({
+                        "symbol": symbol,
+                        "sell_surge_ratio": round(sr, 2),
+                        "yesterday_avg_hour_sell_volume": round(yavg, 2) if yavg is not None else None,
+                        "pct_chg_24h": round(pct_map.get(symbol, 0.0), 2),
+                    })
+
+        await asyncio.gather(*[fetch_one(s) for s in tradeable])
+        results.sort(key=lambda x: x["sell_surge_ratio"], reverse=True)
+        return results
 
     async def get_current_price(self, symbol: str) -> float | None:
         # Try WebSocket cache first

@@ -1,15 +1,15 @@
 {
   "phase": 2,
-  "score": 156710101.61577463,
+  "score": 7219.249190865102,
   "params": {
-    "tp_initial": 0.26,
-    "sl_threshold": 0.46,
-    "tp_reduced": 0.08,
-    "tp_hours_threshold": 6,
-    "trailing_activation_pct": 0.1,
+    "tp_initial": 0.1,
+    "sl_threshold": 0.44,
+    "tp_reduced": 0.24,
+    "tp_hours_threshold": 8,
+    "trailing_activation_pct": 0.12,
     "trailing_distance_pct": 0.04,
-    "add_position_threshold": 0.22,
-    "tp_after_add": 0.4,
+    "add_position_threshold": 0.42000000000000004,
+    "tp_after_add": 0.3,
     "position_sizing_mode": "free_cash_pct",
     "fixed_invest_usd": null
   }

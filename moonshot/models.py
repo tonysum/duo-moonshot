@@ -92,6 +92,9 @@ class AmplitudeTrade:
     account_ratio_change: float | None = None
     lowest_price: float | None = None
     _add_position_multiplier: float = 1.0
+    # R24 / hm1l：扫描时该小时卖量相对昨日小时均卖量的倍数（仅记录，可与 enable_sell_surge_gate 无关）
+    sell_surge_ratio: float | None = None
+    yesterday_avg_hour_sell_volume: float | None = None
 
     # ── Computed Properties ─────────────────────────────────────────
 

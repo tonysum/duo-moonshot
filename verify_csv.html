@@ -1,0 +1,898 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Moonshot CSV 校验 + 图表</title>
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+  :root {
+    --bg: #1a1a2e; --bg2: #16213e; --bg3: #0f3460;
+    --text: #e0e0e0; --text2: #8892a0; --accent: #e94560;
+    --green: #26a69a; --red: #ef5350; --orange: #ff9800;
+    --blue: #42a5f5; --yellow: #ffeb3b; --purple: #ab47bc;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; }
+  body { background: var(--bg); color: var(--text); font-family: 'JetBrains Mono', 'SF Mono', monospace; display: flex; flex-direction: column; }
+
+  .header { background: var(--bg2); border-bottom: 2px solid var(--bg3); padding: 8px 20px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+  .header h1 { font-size: 15px; letter-spacing: 2px; }
+  .header h1 span { color: var(--accent); }
+  .header .meta { font-size: 11px; color: var(--text2); }
+
+  .container { display: flex; flex: 1; min-height: 0; }
+  .sidebar { width: 450px; min-width: 420px; background: var(--bg2); border-right: 1px solid var(--bg3); display: flex; flex-direction: column; overflow: hidden; }
+  .sidebar-scroll { overflow-y: auto; flex-shrink: 0; max-height: 42%; padding: 8px; border-bottom: 1px solid var(--bg3); }
+  .upload-zone {
+    border: 2px dashed var(--bg3); padding: 12px; text-align: center; cursor: pointer; border-radius: 4px; margin-bottom: 8px;
+  }
+  .upload-zone:hover { border-color: var(--accent); }
+  .upload-zone input { display: none; }
+  label.row { display: block; margin: 6px 0; font-size: 10px; color: var(--text2); }
+  label.row input { width: 100%; margin-top: 4px; padding: 5px; background: var(--bg); border: 1px solid var(--bg3); color: var(--text); font-family: inherit; font-size: 12px; }
+  button.action {
+    width: 100%; margin-top: 6px; padding: 8px; font-family: inherit; font-weight: 700; cursor: pointer; font-size: 11px;
+    background: var(--accent); color: #fff; border: 2px solid #000; border-radius: 4px;
+  }
+  button.secondary { background: var(--bg3); color: var(--text); }
+  .hint { font-size: 9px; color: var(--text2); margin-top: 8px; line-height: 1.45; }
+  .trade-list-header {
+    padding: 6px 12px; font-size: 10px; color: var(--text2); text-transform: uppercase; border-bottom: 1px solid var(--bg3);
+    flex-shrink: 0; display: flex; align-items: center; gap: 8px;
+  }
+  .trade-list-header .hdr-idx { width: 32px; flex-shrink: 0; text-align: right; font-variant-numeric: tabular-nums; }
+  .trade-list-header .hdr-rest { flex: 1; display: flex; justify-content: space-between; min-width: 0; }
+  .trade-list { flex: 1; overflow-y: auto; min-height: 0; }
+  .trade-item {
+    padding: 8px 12px; border-bottom: 1px solid rgba(255,255,255,0.04); cursor: pointer;
+    display: flex; align-items: center; gap: 8px; font-size: 11px;
+  }
+  .trade-item .idx {
+    width: 32px; flex-shrink: 0; text-align: right; font-size: 10px; color: var(--text2);
+    font-variant-numeric: tabular-nums;
+  }
+  .trade-item .trade-item-body { flex: 1; display: flex; justify-content: space-between; align-items: center; min-width: 0; gap: 8px; }
+  .trade-item:hover { background: rgba(255,255,255,0.04); }
+  .trade-item.active { background: rgba(233,69,96,0.12); border-left: 3px solid var(--accent); }
+  .trade-item .symbol { font-weight: 700; }
+  .trade-item .info { font-size: 9px; color: var(--text2); margin-top: 2px; }
+  .trade-item .pnl.win { color: var(--green); } .trade-item .pnl.loss { color: var(--red); }
+  .legend { padding: 6px 10px; font-size: 9px; color: var(--text2); border-top: 1px solid var(--bg3); display: flex; flex-wrap: wrap; gap: 8px; flex-shrink: 0; }
+  .legend-item { display: flex; align-items: center; gap: 3px; }
+  .legend-dot { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .validate-panel {
+    flex-shrink: 0; max-height: 28vh; min-height: 120px; display: flex; flex-direction: column;
+    border-top: 2px solid var(--bg3); background: #0d1117;
+  }
+  .validate-panel h3 { font-size: 10px; color: var(--text2); padding: 6px 12px; text-transform: uppercase; letter-spacing: 1px; }
+  .panel-split { display: flex; flex: 1; min-height: 0; gap: 8px; padding: 0 8px 8px; }
+  .log {
+    flex: 1; overflow-y: auto; font-size: 10px; line-height: 1.4; padding: 8px; background: var(--bg); border: 1px solid var(--bg3); border-radius: 4px;
+  }
+  .log .e { color: var(--red); } .log .w { color: var(--orange); } .log .g { color: var(--green); } .log .bad { color: var(--red); }
+  .err-wrap { flex: 1; overflow-y: auto; min-width: 0; }
+  table.err { width: 100%; border-collapse: collapse; font-size: 10px; }
+  table.err th, table.err td { border: 1px solid var(--bg3); padding: 4px 6px; text-align: left; }
+  table.err th { background: var(--bg2); color: var(--text2); }
+
+  .stats-bar { padding: 6px 14px; background: var(--bg); border-bottom: 1px solid var(--bg3); font-size: 11px; display: flex; gap: 12px; flex-wrap: wrap; flex-shrink: 0; align-items: center; }
+  .stats-bar .stat { display: flex; flex-direction: column; }
+  .stats-bar .stat .label { color: var(--text2); font-size: 9px; }
+  .stats-bar .stat .value { font-weight: 700; font-size: 12px; }
+  .interval-bar { display: flex; gap: 2px; margin-left: auto; flex-shrink: 0; }
+  .interval-btn {
+    background: transparent; border: 1px solid var(--bg3); color: var(--text2); padding: 3px 10px;
+    font-size: 11px; cursor: pointer; border-radius: 3px; font-family: inherit;
+  }
+  .interval-btn:hover { border-color: var(--text2); color: var(--text); }
+  .interval-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  .chart-container { flex: 1; position: relative; min-height: 0; }
+  .chart-info {
+    position: absolute; top: 10px; left: 10px; z-index: 10; background: rgba(22,33,62,0.92);
+    padding: 8px 12px; border-radius: 4px; font-size: 11px; border: 1px solid var(--bg3);
+  }
+  .chart-info .title { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+  .chart-info .detail { color: var(--text2); }
+  .chart-info .detail span { margin-right: 10px; }
+  .chart-info .win { color: var(--green); } .chart-info .loss { color: var(--red); }
+
+  .equity-container { height: 90px; flex-shrink: 0; border-top: 1px solid var(--bg3); }
+
+  .loading { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text2); flex-direction: column; gap: 10px; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>🌙 MOON<span>SHOT</span> · 校验 + 图表</h1>
+  <div class="meta" id="fileMeta">与 visualize 相同 K 线 / 标记；另附本地与 Binance 5m 校验</div>
+</div>
+
+<div class="container">
+  <div class="sidebar">
+    <div class="sidebar-scroll">
+      <div class="upload-zone" id="uploadZone">
+        <div>📂 CSV（与 visualize 一致）</div>
+        <input type="file" id="fileInput" accept=".csv">
+      </div>
+      <label class="row">初始资金（余额勾稽）
+        <input type="number" id="initialCapital" value="10000" step="any">
+      </label>
+      <label class="row">OHLC 抽样笔数
+        <input type="number" id="ohlcMax" value="300" min="1">
+      </label>
+      <button type="button" class="action" id="btnLocal">运行本地校验</button>
+      <button type="button" class="action secondary" id="btnOhlc">校验平仓 vs Binance 5m</button>
+      <p class="hint">加载 CSV 后左侧列表点选 = 图表切换。周期 15m/1h/4h/1d 与 visualize 相同。</p>
+    </div>
+    <div class="trade-list-header">
+      <span class="hdr-idx">#</span>
+      <div class="hdr-rest"><span>TRADES</span><span id="tradeCount">0</span></div>
+    </div>
+    <div class="trade-list" id="tradeList"></div>
+    <div class="legend">
+      <span class="legend-item"><span class="legend-dot" style="background:#ff9800"></span>Signal</span>
+      <span class="legend-item"><span class="legend-dot" style="background:#26a69a"></span>Entry</span>
+      <span class="legend-item"><span class="legend-dot" style="background:#42a5f5"></span>TP</span>
+      <span class="legend-item"><span class="legend-dot" style="background:#ef5350"></span>SL</span>
+      <span class="legend-item"><span class="legend-dot" style="background:#ffeb3b"></span>Add</span>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="stats-bar" id="statsBar" style="display:none">
+      <div class="interval-bar" id="intervalBar">
+        <button class="interval-btn" data-interval="15m">15m</button>
+        <button class="interval-btn active" data-interval="1h">1h</button>
+        <button class="interval-btn" data-interval="4h">4h</button>
+        <button class="interval-btn" data-interval="1d">1d</button>
+      </div>
+    </div>
+    <div class="chart-container" id="chartContainer">
+      <div class="loading" id="placeholder">
+        <div style="font-size:40px">📊</div>
+        <div>请加载 CSV</div>
+      </div>
+    </div>
+    <div class="equity-container" id="equityContainer" style="display:none"></div>
+
+    <div class="validate-panel">
+      <h3>校验输出</h3>
+      <div class="panel-split">
+        <div class="log" id="log"></div>
+        <div class="err-wrap" id="errTable"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const COL = {
+  signalTime: '信号时间', signalPrice: '信号价格',
+  entryTime: '建仓时间', symbol: '交易对', entryPrice: '建仓价格',
+  surgePct: '24h涨幅',
+  posSize: '仓位大小', leverage: '杠杆倍数',
+  tpInitialPrice: '止盈价(初始)', tpActualPrice: '止盈价(实际)', tpPrice: '止盈价',
+  slPrice: '止损价', entryReason: '开仓理由',
+  exitTime: '平仓时间', exitPrice: '平仓价格', exitReason: '平仓原因',
+  pnl: '盈亏金额', balance: '余额', pnlPct: '盈亏百分比',
+  holdHours: '持仓小时数', addPrice: '补仓价格', addTime: '补仓时间',
+  hasAdded: '是否补仓', fundingFee: '资金费成本',
+};
+const REQUIRED_BT8 = [
+  '建仓时间', '交易对', '建仓价格', '仓位大小', '杠杆倍数',
+  '平仓时间', '平仓价格', '平仓原因', '盈亏金额', '余额', '盈亏百分比',
+];
+/** 研究/自定义导出：日期与时间分列、价为「建仓价」 */
+const REQUIRED_RESEARCH_MIN = ['交易对', '建仓价'];
+const FEE_RT = (0.0005 + 0.0005) * 2;
+
+let trades = [];
+let rawHeaders = [];
+let csvFormat = 'bt8'; // 'bt8' | 'research'
+let activeIdx = -1;
+let mainChart = null, equityChart = null;
+let candleSeries = null, equitySeries = null, volumeSeries = null;
+let extraSeries = [];
+let currentInterval = '1h';
+let lastKlineCache = {};
+
+function log(html) {
+  document.getElementById('log').innerHTML += html + '\n';
+}
+function clearLog() {
+  document.getElementById('log').innerHTML = '';
+}
+
+/** 去掉 BOM、首尾空白、Excel 导出时字段上的双引号 */
+function normalizeCSVCell(s) {
+  let t = (s ?? '').trim().replace(/^\uFEFF/, '');
+  if (t.startsWith('"') && t.endsWith('"') && t.length >= 2) {
+    t = t.slice(1, -1).replace(/""/g, '"');
+  }
+  return t.trim();
+}
+
+/** RFC4180：支持字段内逗号、双引号转义 */
+function parseCSVLine(line) {
+  const out = [];
+  let cur = '';
+  let i = 0;
+  let inQ = false;
+  while (i < line.length) {
+    const c = line[i];
+    if (inQ) {
+      if (c === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i += 2; continue; }
+        inQ = false; i++; continue;
+      }
+      cur += c; i++; continue;
+    }
+    if (c === '"') { inQ = true; i++; continue; }
+    if (c === ',') { out.push(normalizeCSVCell(cur)); cur = ''; i++; continue; }
+    cur += c; i++;
+  }
+  out.push(normalizeCSVCell(cur));
+  return out;
+}
+
+function firstHeaderIdx(headers, names) {
+  const arr = Array.isArray(names) ? names : [names];
+  for (const n of arr) {
+    const i = headers.indexOf(n);
+    if (i >= 0) return i;
+  }
+  return -1;
+}
+
+/** 建仓日期 + 建仓具体时间 → 与回测一致的时间串 */
+function mergeResearchDateTime(dateStr, timeStr) {
+  const d = (dateStr || '').trim().replace(/\//g, '-');
+  const t = (timeStr || '').trim();
+  if (t && /\d{4}[-/]\d{1,2}[-/]\d{1,2}\s+\d{1,2}:\d{2}/.test(t)) {
+    return t.replace(/\//g, '-').replace(/T/, ' ').slice(0, 19);
+  }
+  if (t && /^\d{1,2}:\d{2}(:\d{2})?$/.test(t) && d) {
+    const day = d.split(/\s/)[0];
+    const rest = t.length === 5 ? `${t}:00` : t;
+    return `${day} ${rest}`.slice(0, 19);
+  }
+  if (d && t) return `${d.split(/\s/)[0]} ${t}`.slice(0, 19);
+  return d || t;
+}
+
+function holdHoursFromIso(entryStr, exitStr) {
+  if (!entryStr || !exitStr) return 0;
+  try {
+    const a = new Date(entryStr.replace(' ', 'T') + 'Z');
+    const b = new Date(exitStr.replace(' ', 'T') + 'Z');
+    return (b - a) / 3600000;
+  } catch {
+    return 0;
+  }
+}
+
+function parseResearchTrades(lines, headers) {
+  const ix = {
+    sym: headers.indexOf('交易对'),
+    sigT: firstHeaderIdx(headers, ['信号时间']),
+    sigP: firstHeaderIdx(headers, ['信号价', '信号价格']),
+    ed: firstHeaderIdx(headers, ['建仓日期']),
+    et: firstHeaderIdx(headers, ['建仓具体时间']),
+    ep: firstHeaderIdx(headers, ['建仓价', '建仓价格']),
+    sg: firstHeaderIdx(headers, ['建仓涨幅%', '建仓涨幅', '24h涨幅']),
+    xd: firstHeaderIdx(headers, ['平仓日期']),
+    xt: firstHeaderIdx(headers, ['平仓具体时间']),
+    xp: firstHeaderIdx(headers, ['平仓价', '平仓价格']),
+    xr: firstHeaderIdx(headers, ['平仓原因', '平仓类型', '出场原因', '结果']),
+    pnl: firstHeaderIdx(headers, ['盈亏金额', '净盈亏', '已实现盈亏']),
+    bal: firstHeaderIdx(headers, ['余额', '平仓后权益']),
+    pos: firstHeaderIdx(headers, ['仓位大小', '持仓数量', '张数']),
+    lev: firstHeaderIdx(headers, ['杠杆倍数', '杠杆']),
+    tpI: firstHeaderIdx(headers, ['止盈价(初始)', '止盈价', '初始止盈价']),
+    tpA: firstHeaderIdx(headers, ['止盈价(实际)', '实际止盈价']),
+    sl: firstHeaderIdx(headers, ['止损价', '止损价格', '初始止损价']),
+    hh: firstHeaderIdx(headers, ['持仓小时数']),
+    reason: firstHeaderIdx(headers, ['开仓理由', '信号说明']),
+  };
+  const result = [];
+  for (let i = 1; i < lines.length; i++) {
+    const rawLine = lines[i];
+    if (!rawLine || !rawLine.trim()) continue;
+    if (/^\s*#/.test(rawLine)) continue;
+    const cols = parseCSVLine(rawLine);
+    if (cols.length < 5) continue;
+    if (cols[0] === '# Summary') continue;
+    const g = (j) => (j >= 0 ? cols[j] : '') || '';
+    const n = (j) => parseFloat(g(j)) || 0;
+    const sym = g(ix.sym);
+    if (!sym) continue;
+    const entryTime = mergeResearchDateTime(g(ix.ed), g(ix.et));
+    const exitTime = mergeResearchDateTime(g(ix.xd), g(ix.xt));
+    const entryPrice = n(ix.ep);
+    if (entryPrice <= 0) continue;
+    const exitPrice = ix.xp >= 0 ? n(ix.xp) : 0;
+    const hh = ix.hh >= 0 ? n(ix.hh) : holdHoursFromIso(entryTime, exitTime);
+    const posSize = ix.pos >= 0 ? n(ix.pos) : 0;
+    const lev = ix.lev >= 0 ? n(ix.lev) : 3;
+    const pnl = ix.pnl >= 0 ? n(ix.pnl) : 0;
+    const bal = ix.bal >= 0 ? n(ix.bal) : 0;
+    const frac = entryPrice > 0 && exitPrice > 0 ? (entryPrice - exitPrice) / entryPrice : 0;
+    result.push({
+      _row: i + 1,
+      _format: 'research',
+      signalTime: g(ix.sigT), signalPrice: n(ix.sigP),
+      entryTime, symbol: sym, entryPrice,
+      surgePct: n(ix.sg),
+      posSize, leverage: lev || 3,
+      tpInitialPrice: ix.tpI >= 0 ? n(ix.tpI) : 0,
+      tpActualPrice: ix.tpA >= 0 ? n(ix.tpA) : (ix.tpI >= 0 ? n(ix.tpI) : 0),
+      slPrice: ix.sl >= 0 ? n(ix.sl) : 0,
+      entryReason: g(ix.reason),
+      exitTime, exitPrice, exitReason: g(ix.xr) || '—',
+      pnl, balance: bal, pnlPct: frac,
+      holdHours: hh,
+      addPrice: 0, addTime: '', hasAdded: false, fundingFee: 0,
+    });
+  }
+  return result;
+}
+
+function parseCSV(text) {
+  const raw = text.replace(/\r/g, '').replace(/^\uFEFF/, '');
+  const lines = raw.split('\n');
+  const nonEmpty = lines.map(l => l.trim()).filter(Boolean);
+  if (!nonEmpty.length) {
+    rawHeaders = [];
+    csvFormat = 'bt8';
+    return [];
+  }
+  rawHeaders = parseCSVLine(lines[0].replace(/^\uFEFF/, ''));
+  const hasBt8Core = rawHeaders.includes('建仓时间') && rawHeaders.includes('建仓价格');
+  const hasResearchCore = rawHeaders.includes('建仓价') && rawHeaders.includes('交易对')
+    && (rawHeaders.includes('建仓日期') || rawHeaders.includes('建仓具体时间'));
+
+  if (hasResearchCore && !hasBt8Core) {
+    csvFormat = 'research';
+    return parseResearchTrades(lines, rawHeaders);
+  }
+
+  csvFormat = 'bt8';
+  const idx = {};
+  for (const [key, zhName] of Object.entries(COL)) {
+    idx[key] = rawHeaders.indexOf(zhName);
+  }
+  if (idx.surgePct < 0 && rawHeaders.indexOf('涨幅') >= 0) idx.surgePct = rawHeaders.indexOf('涨幅');
+
+  const result = [];
+  for (let i = 1; i < lines.length; i++) {
+    const rawLine = lines[i];
+    if (!rawLine || !rawLine.trim()) continue;
+    if (/^\s*#/.test(rawLine)) continue;
+    const cols = parseCSVLine(rawLine);
+    if (cols.length < 10) continue;
+    if (cols[0] === '# Summary' || cols.every(c => !c)) continue;
+    const g = (k) => (idx[k] >= 0 ? cols[idx[k]] : '') || '';
+    const n = (k) => parseFloat(g(k)) || 0;
+    result.push({
+      _row: i + 1,
+      _format: 'bt8',
+      signalTime: g('signalTime'), signalPrice: n('signalPrice'),
+      entryTime: g('entryTime'), symbol: g('symbol'), entryPrice: n('entryPrice'),
+      surgePct: n('surgePct'),
+      posSize: n('posSize'), leverage: n('leverage'),
+      tpInitialPrice: n('tpInitialPrice') || n('tpPrice'),
+      tpActualPrice: n('tpActualPrice') || n('tpPrice'),
+      slPrice: n('slPrice'), entryReason: g('entryReason'),
+      exitTime: g('exitTime'), exitPrice: n('exitPrice'), exitReason: g('exitReason'),
+      pnl: n('pnl'), balance: n('balance'), pnlPct: n('pnlPct'),
+      holdHours: n('holdHours'),
+      addPrice: n('addPrice'), addTime: g('addTime'),
+      hasAdded: g('hasAdded') === 'True' || g('hasAdded') === 'true',
+      fundingFee: n('fundingFee'),
+    });
+  }
+  return result;
+}
+
+function renderTradeList() {
+  const list = document.getElementById('tradeList');
+  list.innerHTML = '';
+  trades.forEach((t, i) => {
+    const div = document.createElement('div');
+    div.className = 'trade-item';
+    div.dataset.idx = i;
+    const isWin = t.pnl > 0;
+    div.innerHTML = `
+      <span class="idx">${i + 1}</span>
+      <div class="trade-item-body">
+        <div>
+          <div class="symbol">${t.symbol}</div>
+          <div class="info">${(t.entryTime||'').slice(5,16)} → ${(t.exitTime||'').slice(5,16)}</div>
+        </div>
+        <div>
+          <div class="pnl ${isWin ? 'win' : 'loss'}">${isWin ? '+' : ''}$${t.pnl.toFixed(2)}</div>
+          <div class="info" style="text-align:right">${t.exitReason || ''}</div>
+        </div>
+      </div>`;
+    div.addEventListener('click', () => selectTrade(i));
+    list.appendChild(div);
+  });
+}
+
+function renderStats() {
+  const bar = document.getElementById('statsBar');
+  bar.style.display = 'flex';
+  bar.querySelectorAll('.stat').forEach(el => el.remove());
+  if (!trades.length) return;
+  const wins = trades.filter(t => t.pnl > 0).length;
+  const totalPnl = trades.reduce((s, t) => s + t.pnl, 0);
+  const lastBal = trades[trades.length - 1].balance;
+  const totalFees = trades.reduce((s, t) => s + (t.fundingFee || 0), 0);
+  const intervalBar = document.getElementById('intervalBar');
+  const stats = [
+    ['Trades', trades.length],
+    ['WR', `${(wins / trades.length * 100).toFixed(1)}%`],
+    ['Net', `${totalPnl >= 0 ? '+' : ''}$${totalPnl.toFixed(2)}`, totalPnl >= 0 ? 'var(--green)' : 'var(--red)'],
+    ['Bal', `$${lastBal.toFixed(2)}`],
+    ['Fund', `$${totalFees.toFixed(2)}`],
+  ];
+  stats.forEach(([label, value, color]) => {
+    const div = document.createElement('div');
+    div.className = 'stat';
+    div.innerHTML = `<span class="label">${label}</span><span class="value" style="${color ? 'color:'+color:''}">${value}</span>`;
+    bar.insertBefore(div, intervalBar);
+  });
+}
+
+function initCharts() {
+  const container = document.getElementById('chartContainer');
+  document.getElementById('placeholder')?.remove();
+  if (mainChart) { mainChart.remove(); mainChart = null; }
+  mainChart = LightweightCharts.createChart(container, {
+    width: container.clientWidth, height: container.clientHeight,
+    layout: { background: { type: 'solid', color: '#1a1a2e' }, textColor: '#8892a0' },
+    grid: { vertLines: { color: 'rgba(255,255,255,0.03)' }, horzLines: { color: 'rgba(255,255,255,0.03)' } },
+    crosshair: { mode: 0 },
+    timeScale: { timeVisible: true, secondsVisible: false, borderColor: '#0f3460' },
+    rightPriceScale: { borderColor: '#0f3460' },
+  });
+  candleSeries = mainChart.addCandlestickSeries({
+    upColor: '#26a69a', downColor: '#ef5350', borderUpColor: '#26a69a', borderDownColor: '#ef5350',
+    wickUpColor: '#26a69a', wickDownColor: '#ef5350',
+    priceFormat: { type: 'price', precision: 6, minMove: 0.000001 },
+  });
+  volumeSeries = mainChart.addHistogramSeries({
+    priceFormat: { type: 'volume' },
+    priceScaleId: 'volume',
+  });
+  mainChart.priceScale('volume').applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } });
+  new ResizeObserver(() => {
+    if (mainChart) mainChart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
+  }).observe(container);
+}
+
+function initEquityChart() {
+  const container = document.getElementById('equityContainer');
+  container.style.display = 'block';
+  if (equityChart) { equityChart.remove(); equityChart = null; }
+  equityChart = LightweightCharts.createChart(container, {
+    width: container.clientWidth, height: container.clientHeight,
+    layout: { background: { type: 'solid', color: '#16213e' }, textColor: '#8892a0' },
+    grid: { vertLines: { visible: false }, horzLines: { color: 'rgba(255,255,255,0.03)' } },
+    timeScale: { visible: false }, rightPriceScale: { borderColor: '#0f3460' }, crosshair: { mode: 0 },
+  });
+  const eqData = trades.filter(t => t.exitTime && t.balance).map(t => ({
+    time: toTimestamp(t.exitTime), value: t.balance,
+  }));
+  if (eqData.length) {
+    equitySeries = equityChart.addAreaSeries({
+      lineColor: '#e94560', topColor: 'rgba(233,69,96,0.3)', bottomColor: 'rgba(233,69,96,0.02)', lineWidth: 2,
+    });
+    equitySeries.setData(eqData);
+  }
+  new ResizeObserver(() => { if (equityChart) equityChart.applyOptions({ width: container.clientWidth }); }).observe(container);
+}
+
+document.getElementById('intervalBar').addEventListener('click', (e) => {
+  const btn = e.target.closest('.interval-btn');
+  if (!btn) return;
+  const interval = btn.dataset.interval;
+  if (interval === currentInterval) return;
+  currentInterval = interval;
+  document.querySelectorAll('.interval-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  lastKlineCache = {};
+  if (activeIdx >= 0) selectTrade(activeIdx);
+});
+
+async function fetchKlines(symbol, interval, startMs, endMs) {
+  const all = [];
+  let cursor = startMs;
+  while (cursor < endMs) {
+    const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&startTime=${cursor}&endTime=${endMs}&limit=1500`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (!data.length) break;
+    all.push(...data);
+    cursor = data[data.length - 1][6] + 1;
+    if (data.length < 1500) break;
+  }
+  return all.map(k => ({
+    time: Math.floor(k[0] / 1000),
+    open: parseFloat(k[1]), high: parseFloat(k[2]), low: parseFloat(k[3]), close: parseFloat(k[4]),
+    volume: parseFloat(k[5]), openTime: k[0],
+  }));
+}
+
+function toTimestamp(dateStr) {
+  if (!dateStr) return 0;
+  return Math.floor(new Date(dateStr.replace(' ', 'T') + 'Z').getTime() / 1000);
+}
+
+function fmtInfoPrice(p) {
+  if (p == null || !(p > 0)) return '—';
+  return p > 100 ? p.toFixed(2) : p > 1 ? p.toFixed(4) : p.toFixed(6);
+}
+
+async function selectTrade(idx) {
+  activeIdx = idx;
+  document.querySelectorAll('.trade-item').forEach((el, i) => el.classList.toggle('active', i === idx));
+  document.querySelector('.trade-item.active')?.scrollIntoView({ block: 'nearest' });
+
+  const t = trades[idx];
+  if (!t || !t.symbol || !t.entryTime) return;
+
+  let infoEl = document.querySelector('.chart-info');
+  if (!infoEl) {
+    infoEl = document.createElement('div');
+    infoEl.className = 'chart-info';
+    document.getElementById('chartContainer').appendChild(infoEl);
+  }
+  const isWin = t.pnl > 0;
+  infoEl.innerHTML = `
+    <div class="title">${t.symbol} · SHORT ${t.leverage}×</div>
+    <div class="detail">
+      <span>Surge: +${t.surgePct.toFixed(1)}%</span>
+      <span>开仓价: ${fmtInfoPrice(t.entryPrice)}</span>
+      <span>平仓价: ${fmtInfoPrice(t.exitPrice)}</span>
+      <span>Hold: ${t.holdHours ? t.holdHours.toFixed(0) : '—'}h</span>
+      <span class="${isWin ? 'win' : 'loss'}">PnL: ${isWin ? '+' : ''}$${t.pnl.toFixed(2)}</span>
+      <span>${t.exitReason || ''}</span>
+      ${t.hasAdded ? '<span style="color:#ffeb3b">补仓</span>' : ''}
+    </div>`;
+
+  const signalTs = t.signalTime ? new Date(t.signalTime.replace(' ', 'T') + 'Z').getTime() : null;
+  const entryTs = new Date(t.entryTime.replace(' ', 'T') + 'Z').getTime();
+  const exitTs = t.exitTime ? new Date(t.exitTime.replace(' ', 'T') + 'Z').getTime() : Date.now();
+  const startMs = (signalTs ? Math.min(signalTs, entryTs) : entryTs) - 24 * 3600000;
+  const endMs = exitTs + 24 * 3600000;
+
+  try {
+    const cacheKey = `${t.symbol}_${currentInterval}_${startMs}_${endMs}`;
+    let klines = lastKlineCache[cacheKey];
+    if (!klines) {
+      klines = await fetchKlines(t.symbol, currentInterval, startMs, endMs);
+      lastKlineCache[cacheKey] = klines;
+    }
+    renderChart(klines, t);
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+function renderChart(klines, t) {
+  if (!klines.length || !candleSeries) return;
+  candleSeries.setData(klines.map(k => ({ time: k.time, open: k.open, high: k.high, low: k.low, close: k.close })));
+  volumeSeries.setData(klines.map(k => ({
+    time: k.time, value: k.volume,
+    color: k.close >= k.open ? 'rgba(38,166,154,0.3)' : 'rgba(239,83,80,0.3)',
+  })));
+
+  for (const s of extraSeries) { try { mainChart.removeSeries(s); } catch (e) {} }
+  extraSeries = [];
+
+  const markers = [];
+  if (t.signalTime && t.signalPrice) {
+    markers.push({
+      time: toTimestamp(t.signalTime), position: 'aboveBar', color: '#ff9800', shape: 'circle',
+      text: `★ +${t.surgePct.toFixed(0)}%`,
+    });
+  }
+  markers.push({
+    time: toTimestamp(t.entryTime), position: 'aboveBar', color: '#26a69a', shape: 'arrowDown',
+    text: '▼ Entry',
+  });
+  if (t.hasAdded && t.addTime) {
+    markers.push({
+      time: toTimestamp(t.addTime), position: 'belowBar', color: '#ffeb3b', shape: 'square', text: '◆ Add',
+    });
+  }
+  if (t.exitTime) {
+    const exitColor = (t.exitReason || '').includes('止盈') ? '#42a5f5'
+      : (t.exitReason || '').includes('止损') ? '#ef5350'
+      : (t.exitReason || '').includes('追踪') ? '#ab47bc' : '#9e9e9e';
+    markers.push({
+      time: toTimestamp(t.exitTime), position: 'belowBar', color: exitColor, shape: 'arrowUp',
+      text: `▲ ${t.exitReason || ''}`,
+    });
+  }
+  markers.sort((a, b) => a.time - b.time);
+  candleSeries.setMarkers(markers);
+
+  const fmtPrice = (p) => p > 100 ? p.toFixed(2) : p > 1 ? p.toFixed(4) : p.toFixed(6);
+  const lineStart = klines[0].time;
+  const lineEnd = klines[klines.length - 1].time;
+  const lineBase = {
+    priceScaleId: 'right',
+    priceLineVisible: false,
+    lastValueVisible: true,
+    crosshairMarkerVisible: false,
+    priceFormat: { type: 'price', precision: 6, minMove: 0.000001 },
+  };
+  const ep = t.entryPrice > 0 ? t.entryPrice : 1;
+
+  if (t.tpInitialPrice) {
+    const tpPct = ((ep - t.tpInitialPrice) / ep * 100).toFixed(1);
+    const tpLine = mainChart.addLineSeries({
+      color: 'rgba(38,166,154,0.7)', lineWidth: 4, lineStyle: 0,
+      ...lineBase,
+      title: `TP初始 ${fmtPrice(t.tpInitialPrice)} (${tpPct}%)`,
+    });
+    tpLine.setData([{ time: lineStart, value: t.tpInitialPrice }, { time: lineEnd, value: t.tpInitialPrice }]);
+    extraSeries.push(tpLine);
+  }
+  if (t.tpActualPrice && Math.abs(t.tpActualPrice - t.tpInitialPrice) > 0.0001) {
+    const tpPct2 = ((ep - t.tpActualPrice) / ep * 100).toFixed(1);
+    const tpLine2 = mainChart.addLineSeries({
+      color: 'rgba(38,166,154,0.45)', lineWidth: 4, lineStyle: 2,
+      ...lineBase,
+      title: `TP实际 ${fmtPrice(t.tpActualPrice)} (${tpPct2}%)`,
+    });
+    tpLine2.setData([{ time: lineStart, value: t.tpActualPrice }, { time: lineEnd, value: t.tpActualPrice }]);
+    extraSeries.push(tpLine2);
+  }
+  if (t.slPrice) {
+    const slPct = ((t.slPrice - ep) / ep * 100).toFixed(1);
+    const slLine = mainChart.addLineSeries({
+      color: 'rgba(239,83,80,0.7)', lineWidth: 4, lineStyle: 2,
+      ...lineBase,
+      title: `SL ${fmtPrice(t.slPrice)} (${slPct}%)`,
+    });
+    slLine.setData([{ time: lineStart, value: t.slPrice }, { time: lineEnd, value: t.slPrice }]);
+    extraSeries.push(slLine);
+  }
+  const entryLine = mainChart.addLineSeries({
+    color: 'rgba(255,255,255,0.35)', lineWidth: 4, lineStyle: 1,
+    ...lineBase,
+    title: `Entry ${fmtPrice(t.entryPrice)}`,
+  });
+  entryLine.setData([{ time: lineStart, value: t.entryPrice }, { time: lineEnd, value: t.entryPrice }]);
+  extraSeries.push(entryLine);
+  if (t.exitPrice > 0) {
+    const exitLine = mainChart.addLineSeries({
+      color: 'rgba(66, 165, 245, 0.85)', lineWidth: 4, lineStyle: 3,
+      ...lineBase,
+      title: `平仓 ${fmtPrice(t.exitPrice)}`,
+    });
+    exitLine.setData([{ time: lineStart, value: t.exitPrice }, { time: lineEnd, value: t.exitPrice }]);
+    extraSeries.push(exitLine);
+  }
+
+  mainChart.timeScale().fitContent();
+  document.onkeydown = (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'j') { e.preventDefault(); if (activeIdx < trades.length - 1) selectTrade(activeIdx + 1); }
+    if (e.key === 'ArrowUp' || e.key === 'k') { e.preventDefault(); if (activeIdx > 0) selectTrade(activeIdx - 1); }
+  };
+}
+
+function handleFile(file) {
+  if (!file) return;
+  document.getElementById('fileMeta').textContent = file.name;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    trades = parseCSV(e.target.result);
+    document.getElementById('tradeCount').textContent = trades.length;
+    clearLog();
+    const fmtLabel = csvFormat === 'research' ? '研究模板' : 'BT8 trades';
+    log(`<span class="g">已解析 ${trades.length} 笔（${fmtLabel}）；点击左侧或 ↑↓ 切换图表</span>`);
+    document.getElementById('errTable').innerHTML = '';
+    renderTradeList();
+    renderStats();
+    initCharts();
+    initEquityChart();
+    if (trades.length) selectTrade(0);
+  };
+  reader.readAsText(file, 'utf-8');
+}
+
+document.getElementById('uploadZone').addEventListener('click', () => document.getElementById('fileInput').click());
+const uz = document.getElementById('uploadZone');
+uz.addEventListener('dragover', (e) => { e.preventDefault(); uz.style.borderColor = 'var(--accent)'; });
+uz.addEventListener('dragleave', () => { uz.style.borderColor = ''; });
+uz.addEventListener('drop', (e) => {
+  e.preventDefault();
+  uz.style.borderColor = '';
+  if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+});
+document.getElementById('fileInput').addEventListener('change', (e) => {
+  if (e.target.files[0]) handleFile(e.target.files[0]);
+});
+
+function runLocal() {
+  clearLog();
+  document.getElementById('errTable').innerHTML = '';
+  if (!trades.length) {
+    log('<span class="e">请先加载 CSV</span>');
+    return;
+  }
+  let missing = [];
+  if (csvFormat === 'research') {
+    missing = REQUIRED_RESEARCH_MIN.filter(h => !rawHeaders.includes(h));
+    if (missing.length) {
+      log(`<span class="e">研究模板缺少列: ${missing.join(', ')}</span>`);
+      log(`<span class="w">解析到的表头 (${rawHeaders.length}列): ${rawHeaders.slice(0, 20).join(' | ')}${rawHeaders.length > 20 ? ' …' : ''}</span>`);
+      return;
+    }
+    log('<span class="g">表头 OK（研究模板）</span>');
+  } else {
+    missing = REQUIRED_BT8.filter(h => !rawHeaders.includes(h));
+    if (missing.length) {
+      log(`<span class="e">缺少列: ${missing.join(', ')}</span>`);
+      log(`<span class="w">解析到的表头 (${rawHeaders.length}列): ${rawHeaders.slice(0, 20).join(' | ')}${rawHeaders.length > 20 ? ' …' : ''}</span>`);
+      log(`<span class="w">若你打开的是 rolling_signals / moonshot_signals 请改选 trades CSV（rolling_*.csv / moonshot_*.csv）</span>`);
+      return;
+    }
+    log('<span class="g">表头 OK（BT8 trades）</span>');
+  }
+
+  const researchSkipPnL = csvFormat === 'research'
+    && (!rawHeaders.includes('仓位大小') || !rawHeaders.includes('盈亏金额'));
+  if (csvFormat === 'research' && researchSkipPnL) {
+    log('<span class="w">研究模板无「仓位大小/盈亏金额」：跳过 PnL 公式与余额勾稽，仅检查交易对与建仓价</span>');
+  }
+
+  const initial = parseFloat(document.getElementById('initialCapital').value) || 10000;
+  const errors = [];
+  let pnlOk = 0, pctOk = 0, pnlCheckN = 0;
+  for (const t of trades) {
+    if (!t.symbol) { errors.push({ row: t._row, sym: '', msg: '交易对为空' }); continue; }
+    if (t.entryPrice <= 0) {
+      errors.push({ row: t._row, sym: t.symbol, msg: '建仓价无效' }); continue;
+    }
+    if (researchSkipPnL) continue;
+
+    if (t.exitPrice <= 0) {
+      errors.push({ row: t._row, sym: t.symbol, msg: '价格无效' }); continue;
+    }
+    if (t.posSize <= 0 || t.leverage <= 0) {
+      errors.push({ row: t._row, sym: t.symbol, msg: '仓位/杠杆无效' }); continue;
+    }
+    pnlCheckN++;
+    const invest = t.posSize * t.entryPrice;
+    const frac = (t.entryPrice - t.exitPrice) / t.entryPrice;
+    const actualPctPercent = frac * 100;
+    const leveragedPct = actualPctPercent * t.leverage;
+    const gross = invest * leveragedPct / 100;
+    const fees = invest * FEE_RT;
+    const expectedNet = gross - (t.fundingFee || 0) - fees;
+    const diff = Math.abs(expectedNet - t.pnl);
+    const tol = Math.max(0.75, Math.abs(t.pnl) * 0.015);
+    if (diff <= tol) pnlOk++;
+    else errors.push({ row: t._row, sym: t.symbol, msg: `PnL 偏差 ${diff.toFixed(2)}` });
+
+    const diffPct = Math.abs(t.pnlPct - frac);
+    if (diffPct < 1e-5 || diffPct < 1e-4 * Math.max(Math.abs(frac), 1e-6)) pctOk++;
+    else errors.push({ row: t._row, sym: t.symbol, msg: `盈亏%% 与 frac 不一致` });
+  }
+
+  const sumPnl = trades.reduce((s, t) => s + t.pnl, 0);
+  const lastBal = trades.length ? trades[trades.length - 1].balance : 0;
+  let chainOk = true;
+  const runChain = !researchSkipPnL && (csvFormat === 'bt8'
+    || (csvFormat === 'research' && rawHeaders.includes('余额') && trades.some(t => t.balance > 0)));
+  if (runChain) {
+    const chainDiff = Math.abs(initial + sumPnl - lastBal);
+    chainOk = chainDiff <= Math.max(200, Math.abs(lastBal) * 0.02);
+    if (!chainOk) errors.push({ row: '—', sym: '—', msg: `余额勾稽 Δ=${chainDiff.toFixed(2)}` });
+  }
+
+  const pnlLine = researchSkipPnL
+    ? `PnL 校验已跳过（研究模板）`
+    : `PnL: ${pnlOk}/${pnlCheckN} · 盈亏%%: ${pctOk}/${pnlCheckN}`;
+  const balLine = !runChain ? '余额勾稽: —' : `余额: ${chainOk ? 'OK' : '可疑'}`;
+  log(`${pnlLine} · ${balLine}`);
+  if (errors.length) {
+    const tbl = ['<table class="err"><tr><th>行</th><th>对</th><th>说明</th></tr>'];
+    for (const e of errors.slice(0, 60)) {
+      tbl.push(`<tr><td>${e.row}</td><td>${e.sym}</td><td style="color:var(--red)">${e.msg}</td></tr>`);
+    }
+    tbl.push('</table>');
+    document.getElementById('errTable').innerHTML = tbl.join('');
+  }
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function fetchKlines5mOnly(symbol, startMs, endMs) {
+  const all = [];
+  let cursor = startMs;
+  while (cursor < endMs) {
+    const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=5m&startTime=${cursor}&endTime=${endMs}&limit=1500`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(String(res.status));
+    const data = await res.json();
+    if (!data.length) break;
+    all.push(...data);
+    cursor = data[data.length - 1][6] + 1;
+    if (data.length < 1500) break;
+  }
+  return all.map(k => ({
+    openTime: k[0],
+    open: parseFloat(k[1]), high: parseFloat(k[2]), low: parseFloat(k[3]), close: parseFloat(k[4]),
+  }));
+}
+
+function exitBarOpenMs(exitStr) {
+  const d = new Date(exitStr.replace(' ', 'T') + 'Z');
+  const bucket = Math.floor(d.getUTCMinutes() / 5) * 5;
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), d.getUTCHours(), bucket, 0, 0);
+}
+
+function exitOkShort(reason, bar, exitPx) {
+  if (!bar) return { ok: false, note: '无棒' };
+  const lo = Math.min(bar.low, bar.high), hi = Math.max(bar.low, bar.high);
+  const m = Math.max(1e-8, 2e-4 * Math.max(Math.abs(exitPx), Math.abs(hi)));
+  const r = reason || '';
+  if (r.includes('止损') || r.includes('动态')) return { ok: hi + m >= exitPx, note: 'SL' };
+  if (r.includes('追踪')) return { ok: hi + m >= exitPx, note: 'trail' };
+  if (r.includes('止盈')) return { ok: lo - m <= exitPx, note: 'TP' };
+  if (r.includes('超时')) return { ok: lo - m <= exitPx && hi + m >= exitPx, note: 'to' };
+  return { ok: exitPx >= lo - m && exitPx <= hi + m, note: 'bar' };
+}
+
+async function runOhlc() {
+  clearLog();
+  document.getElementById('errTable').innerHTML = '';
+  if (!trades.length) { log('<span class="e">无数据</span>'); return; }
+  const maxN = Math.min(trades.length, parseInt(document.getElementById('ohlcMax').value, 10) || 300);
+  log(`5m 抽样 ${maxN}…`);
+  let ok = 0, fail = 0;
+  const errors = [];
+  for (let i = 0; i < maxN; i++) {
+    const t = trades[i];
+    if (!t.exitTime || !t.symbol) { fail++; continue; }
+    const entryMs = new Date(t.entryTime.replace(' ', 'T') + 'Z').getTime();
+    const exitMs = new Date(t.exitTime.replace(' ', 'T') + 'Z').getTime();
+    try {
+      const kl = await fetchKlines5mOnly(t.symbol, entryMs - 3600000, exitMs + 3600000);
+      const want = exitBarOpenMs(t.exitTime);
+      const bar = kl.find(b => b.openTime === want) || kl.find(b => Math.abs(b.openTime - want) < 120000);
+      const chk = exitOkShort(t.exitReason, bar, t.exitPrice);
+      if (chk.ok) ok++;
+      else {
+        fail++;
+        errors.push({ row: t._row, sym: t.symbol, msg: `${chk.note} ${t.exitReason}` });
+      }
+    } catch (e) {
+      fail++;
+      errors.push({ row: t._row, sym: t.symbol, msg: String(e.message) });
+    }
+    await sleep(120);
+  }
+  log(`OHLC: <span class="g">${ok}</span> ok / <span class="bad">${fail}</span> fail`);
+  if (errors.length) {
+    document.getElementById('errTable').innerHTML = '<table class="err">' + errors.slice(0, 40).map(e =>
+      `<tr><td>${e.row}</td><td>${e.sym}</td><td style="color:var(--red)">${e.msg}</td></tr>`).join('') + '</table>';
+  }
+}
+
+document.getElementById('btnLocal').addEventListener('click', runLocal);
+document.getElementById('btnOhlc').addEventListener('click', () => runOhlc().catch(e => log(`<span class="e">${e}</span>`)));
+</script>
+</body>
+</html>

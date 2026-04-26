@@ -36,6 +36,10 @@ def _print_r24_run_params(cfg: RollingConfig, start: datetime, end: datetime, in
         print(f"  Sizing: fixed ${cfg.fixed_invest_usd:,.2f}/trade")
     else:
         print(f"  Sizing: {cfg.position_sizing_mode}  ratio={cfg.position_size_ratio}")
+    if cfg.enable_sell_surge_gate:
+        print(
+            f"  Sell surge gate: ON  threshold>={cfg.sell_surge_threshold}  max<={cfg.sell_surge_max:g}"
+        )
     print(f"{'='*50}")
 
 
@@ -98,6 +102,31 @@ def main():
         default=None,
         help="Fixed margin per trade (USD) when --sizing fixed_usd",
     )
+    parser.add_argument(
+        "--fixed-margin",
+        type=float,
+        default=None,
+        help="Same as --fixed-invest (fixed USD margin per trade when --sizing fixed_usd)",
+    )
+    parser.add_argument(
+        "--sell-surge",
+        action="store_true",
+        help="Enable sell-volume surge gate (AND with R24 top gainers; hm1l-aligned)",
+    )
+    parser.add_argument(
+        "--sell-surge-threshold",
+        type=float,
+        default=None,
+        metavar="X",
+        help="Min surge ratio vs yesterday avg hourly sell (default: RollingConfig.sell_surge_threshold)",
+    )
+    parser.add_argument(
+        "--sell-surge-max",
+        type=float,
+        default=None,
+        metavar="X",
+        help="Max surge ratio upper cap (default: RollingConfig.sell_surge_max)",
+    )
 
     args = parser.parse_args()
 
@@ -110,10 +139,19 @@ def main():
         scan_interval_hours=args.scan_interval if args.scan_interval is not None else base.scan_interval_hours,
         position_sizing_mode=args.sizing if args.sizing is not None else base.position_sizing_mode,
         position_size_ratio=args.size_ratio if args.size_ratio is not None else base.position_size_ratio,
-        fixed_invest_usd=args.fixed_invest if args.fixed_invest is not None else base.fixed_invest_usd,
+        fixed_invest_usd=(
+            args.fixed_invest
+            if args.fixed_invest is not None
+            else (args.fixed_margin if args.fixed_margin is not None else base.fixed_invest_usd)
+        ),
+        enable_sell_surge_gate=True if args.sell_surge else base.enable_sell_surge_gate,
+        sell_surge_threshold=(
+            args.sell_surge_threshold if args.sell_surge_threshold is not None else base.sell_surge_threshold
+        ),
+        sell_surge_max=args.sell_surge_max if args.sell_surge_max is not None else base.sell_surge_max,
     )
-    if cfg.position_sizing_mode == "fixed_usd" and cfg.fixed_invest_usd is None:
-        parser.error("--fixed-invest is required when --sizing fixed_usd")
+    if cfg.position_sizing_mode == "fixed_usd" and (cfg.fixed_invest_usd is None or cfg.fixed_invest_usd <= 0):
+        parser.error("--fixed-invest or --fixed-margin (>0) is required when --sizing fixed_usd")
 
     start = datetime.strptime(args.start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     end = datetime.strptime(args.end, "%Y-%m-%d").replace(tzinfo=timezone.utc) if args.end else datetime.now(timezone.utc)

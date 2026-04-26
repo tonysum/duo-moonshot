@@ -25,11 +25,25 @@ class Kline(BaseModel):
     high: str
     low: str
     close: str
+    volume: str
     quote_asset_volume: str
+    taker_buy_quote_asset_volume: str
 
     @classmethod
     def from_array(cls, data: list):
-        return cls(open_time=data[0], open=data[1], high=data[2], low=data[3], close=data[4], quote_asset_volume=data[7])
+        # fapi/v1/klines array indices:
+        # 0 open_time, 1 open, 2 high, 3 low, 4 close, 5 volume,
+        # 7 quote_asset_volume, 10 taker_buy_quote_asset_volume
+        return cls(
+            open_time=data[0],
+            open=data[1],
+            high=data[2],
+            low=data[3],
+            close=data[4],
+            volume=data[5],
+            quote_asset_volume=data[7],
+            taker_buy_quote_asset_volume=data[10],
+        )
 
 class TickerPrice(BaseModel):
     symbol: str
@@ -53,7 +67,17 @@ class BinanceFuturesClient:
         self._client: httpx.AsyncClient | None = None
 
     async def __aenter__(self):
-        self._client = httpx.AsyncClient(base_url=self.BASE_URL, headers={"X-MBX-APIKEY": self.api_key} if self.api_key else {})
+        limits = httpx.Limits(
+            max_connections=40,
+            max_keepalive_connections=10,
+            keepalive_expiry=30.0,
+        )
+        self._client = httpx.AsyncClient(
+            base_url=self.BASE_URL,
+            headers={"X-MBX-APIKEY": self.api_key} if self.api_key else {},
+            limits=limits,
+            timeout=httpx.Timeout(10.0),
+        )
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):

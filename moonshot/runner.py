@@ -89,6 +89,7 @@ class MoonshotRunner:
                             cap = self._account.capital_at(c5.open_time)
                             if cap >= trade.position_size * exit_p:
                                 self._account.add_position_bt8(trade, exit_p, c5.open_time, cfg.add_position_multiplier)
+                                trade.lowest_price = c5.low
                                 if self.verbose:
                                     logger.info("  补仓 %s @ %.4f avg=%.4f", symbol, exit_p, trade.entry_price)
                             recheck = self._strategy.check_exit(trade, c5.high, c5.low, c5.close, c5.open_time, hold_h)
@@ -164,15 +165,15 @@ class MoonshotRunner:
             still_pending = []
             for item in pending_entries:
                 symbol, target_dt = item['symbol'], item['target_date']
-                if current_dt < target_dt: 
-                    still_pending.append(item); 
-                    luojicontinue
+                if current_dt < target_dt:
+                    still_pending.append(item)
+                    continue
                 if current_dt > target_dt + timedelta(hours=48):
                     if self.verbose:
                         logger.debug("  ⏳ %s pending signal expired after 48h", symbol)
                     continue
                 if len(open_trades) >= cfg.max_positions or any(t.level == symbol for t in open_trades):
-                    still_pending.append(item); 
+                    still_pending.append(item);
                     continue
 
                 st_tf = getattr(cfg, 'st_timeframe', '1h')
@@ -180,13 +181,15 @@ class MoonshotRunner:
                 if cfg.enable_supertrend_gate:
                     trend = self._feed.load_supertrend(symbol, current_dt, period=cfg.st_period, multiplier=cfg.st_multiplier, timeframe=st_tf)
                     if trend == "bearish":
-                        candles = self._feed.load_1h(symbol, current_dt, current_dt) if st_tf == '1h' else self._feed.load_15m(symbol, current_dt, current_dt)
-                        if candles: entry_p = candles[0].close; 
-                        entry_t = current_dt
+                        candles_5m = self._feed.load_5m(symbol, current_dt, current_dt)
+                        if candles_5m:
+                            entry_p = candles_5m[0].close
+                            entry_t = candles_5m[0].open_time
                 else:
-                    candles = self._feed.load_1h(symbol, current_dt, current_dt)
-                    if candles: entry_p = candles[0].close; 
-                    entry_t = current_dt
+                    candles_5m = self._feed.load_5m(symbol, current_dt, current_dt)
+                    if candles_5m:
+                        entry_p = candles_5m[0].close
+                        entry_t = candles_5m[0].open_time
 
                 if entry_p:
                     cap = self._account.capital_at(entry_t)
@@ -206,7 +209,7 @@ class MoonshotRunner:
                         )
                         self._account.open_position_bt8(trade, invest, cfg.leverage)
                         trade._add_position_multiplier = cfg.add_position_multiplier
-                        trades.append(trade); 
+                        trades.append(trade);
                         open_trades.append(trade)
 
                         # Link trade back to signal record
@@ -216,12 +219,12 @@ class MoonshotRunner:
 
                         if self.verbose:
                             logger.info("  🎯 MOONSHOT %s @ %.4f ratio=%.2f invest=%.0f", symbol, entry_p, entry_ratio or 0, invest)
-                else: 
+                else:
                     still_pending.append(item)
             pending_entries = still_pending
 
             # 4. New signals (daily midnight)
-            if current_dt.hour == 0 and len(open_trades) < cfg.max_positions:
+            if current_dt.hour == 0 and len(open_trades) + len(pending_entries) < cfg.max_positions:
                 _ = self._strategy.select_signals(self._feed, current_dt, daily_gainers)
 
                 for detail in getattr(self._strategy, 'last_signal_details', []):
@@ -293,6 +296,9 @@ class MoonshotRunner:
                         ])
 
                     if accept:
+                        # Check total allocated positions
+                        if len(open_trades) + len(pending_entries) >= cfg.max_positions:
+                            continue
                         pending_entries.append({
                             'symbol': symbol,
                             'pct_chg': pct_chg,

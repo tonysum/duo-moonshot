@@ -3,14 +3,16 @@
 
 import argparse
 import logging
-import time
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
-from moonshot.db import get_postgres_db as get_db
-from moonshot.data_feed import DataFeed
+
 from moonshot.account import Account
-from moonshot.strategy import MoonshotStrategy, MoonshotConfig
+from moonshot.data_feed import DataFeed
+from moonshot.db import get_postgres_db as get_db
+from moonshot.moonshot_config_load import load_moonshot_config
 from moonshot.runner import MoonshotRunner
+from moonshot.strategy import MoonshotStrategy
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("moonshot")
@@ -30,10 +32,19 @@ def main():
     )
     parser.add_argument("--size-ratio", type=float, default=None, help="Override position_size_ratio (default 0.04)")
     parser.add_argument("--fixed-invest", type=float, default=None, help="Fixed margin per trade when --sizing fixed_usd")
+    parser.add_argument(
+        "--moonshot-config",
+        default=None,
+        metavar="PATH",
+        help="Baseline Moonshot JSON (default: MOONSHOT_DAILY_PARAMS or config/moonshot_params.json)",
+    )
 
     args = parser.parse_args()
-    if args.sizing == "fixed_usd" and args.fixed_invest is None:
-        parser.error("--fixed-invest is required when --sizing fixed_usd")
+    base = load_moonshot_config(Path(args.moonshot_config) if args.moonshot_config else None)
+    ratio = args.size_ratio if args.size_ratio is not None else base.position_size_ratio
+    fixed = args.fixed_invest if args.fixed_invest is not None else base.fixed_invest_usd
+    if args.sizing == "fixed_usd" and (fixed is None or fixed <= 0):
+        parser.error("--fixed-invest or fixed_invest_usd in JSON required when --sizing fixed_usd")
     
     start = datetime.strptime(args.start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     end = datetime.strptime(args.end, "%Y-%m-%d").replace(tzinfo=timezone.utc) if args.end else datetime.now(timezone.utc)
@@ -42,12 +53,12 @@ def main():
     db.connect()
     feed = DataFeed(db)
     
-    ratio = args.size_ratio if args.size_ratio is not None else 0.04
-    cfg = MoonshotConfig(
+    cfg = replace(
+        base,
         top_n=args.top_n,
         position_sizing_mode=args.sizing,
         position_size_ratio=ratio,
-        fixed_invest_usd=args.fixed_invest,
+        fixed_invest_usd=fixed,
     )
     strategy = MoonshotStrategy(config=cfg)
     account = Account(args.capital)
@@ -59,7 +70,7 @@ def main():
     print(f"  Period: {start.date()} to {end.date()}")
     print(f"  Capital: ${args.capital:,.2f}")
     if args.sizing == "fixed_usd":
-        print(f"  Sizing: fixed ${args.fixed_invest:,.2f}/trade")
+        print(f"  Sizing: fixed ${fixed:,.2f}/trade")
     else:
         print(f"  Sizing: {args.sizing}  ratio={ratio}")
     print(f"{'='*50}\n")

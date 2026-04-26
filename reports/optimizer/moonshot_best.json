@@ -1,0 +1,48 @@
+{
+  "score": 1395.0855418717604,
+  "params": {
+    "top_n": 3,
+    "min_pct_chg": 10.0,
+    "min_listed_days": 10,
+    "enable_main_profit_check": true,
+    "main_profit_thresholds": [
+      [
+        40.0,
+        51.0
+      ],
+      [
+        60.0,
+        45.0
+      ],
+      [
+        999.0,
+        35.0
+      ]
+    ],
+    "enable_supertrend_gate": false,
+    "st_period": 6,
+    "st_multiplier": 4.0,
+    "st_timeframe": "1h",
+    "position_sizing_mode": "free_cash_pct",
+    "position_size_ratio": 0.04,
+    "fixed_invest_usd": null,
+    "max_positions": 7,
+    "leverage": 2,
+    "max_hold_days": 11,
+    "enable_funding_fee": true,
+    "tp_initial": 0.18,
+    "tp_reduced": 0.14,
+    "tp_hours_threshold": 10,
+    "tp_after_add": 0.45,
+    "sl_threshold": 0.34,
+    "enable_trailing_take_profit": true,
+    "trailing_activation_pct": 0.16,
+    "trailing_distance_pct": 0.09,
+    "enable_dynamic_ratio_sl": false,
+    "ratio_change_threshold": -0.18,
+    "ratio_data_start": "2025-12-12",
+    "enable_add_position": true,
+    "add_position_threshold": 0.36,
+    "add_position_multiplier": 1.0
+  }
+}

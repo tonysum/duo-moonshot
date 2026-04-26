@@ -1,0 +1,337 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1776399474465,
+  "projectRoot": "/Users/tony/Documents/duo-moonshot",
+  "techStack": {
+    "languages": [
+      {
+        "name": "Python",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "pyproject.toml"
+        ]
+      }
+    ],
+    "frameworks": [
+      {
+        "name": "fastapi",
+        "version": null,
+        "category": "backend"
+      },
+      {
+        "name": "pytest",
+        "version": null,
+        "category": "testing"
+      }
+    ],
+    "packageManager": null,
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": "pytest",
+    "lintCommand": "ruff check",
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "scripts"
+    ],
+    "gitBranches": null
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "__pycache__": {
+      "path": "__pycache__",
+      "purpose": null,
+      "fileCount": 3,
+      "lastAccessed": 1776399474435,
+      "keyFiles": [
+        "backtest.cpython-311.pyc",
+        "backtest_rolling.cpython-311.pyc",
+        "backtest_rolling_raw_surge.cpython-311.pyc"
+      ]
+    },
+    "bak": {
+      "path": "bak",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1776399474435,
+      "keyFiles": [
+        "rolling_strategy.py"
+      ]
+    },
+    "config": {
+      "path": "config",
+      "purpose": "Configuration files",
+      "fileCount": 6,
+      "lastAccessed": 1776399474435,
+      "keyFiles": [
+        "moonshot_params.json",
+        "r24_params.json",
+        "r24_raw_surge_params-copy-copy.json",
+        "r24_raw_surge_params-copy.json",
+        "r24_raw_surge_params.json"
+      ]
+    },
+    "logs": {
+      "path": "logs",
+      "purpose": null,
+      "fileCount": 8,
+      "lastAccessed": 1776399474436,
+      "keyFiles": [
+        "paper-error.log",
+        "paper-out.log",
+        "sell_surge_backtest_20260412_192329.log",
+        "sell_surge_backtest_20260412_192334.log",
+        "sell_surge_backtest_20260412_192716.log"
+      ]
+    },
+    "moonshot": {
+      "path": "moonshot",
+      "purpose": null,
+      "fileCount": 27,
+      "lastAccessed": 1776399474436,
+      "keyFiles": [
+        "account.py",
+        "client.py",
+        "daily_optimizer.py",
+        "data_feed.py",
+        "db.py"
+      ]
+    },
+    "reports": {
+      "path": "reports",
+      "purpose": null,
+      "fileCount": 10,
+      "lastAccessed": 1776399474436,
+      "keyFiles": [
+        "rolling_raw_surge_20260417_105635.csv",
+        "rolling_raw_surge_20260417_110819.csv",
+        "rolling_raw_surge_20260417_111023.csv",
+        "rolling_raw_surge_signals_20260417_105627.csv",
+        "rolling_raw_surge_signals_20260417_105635.csv"
+      ]
+    },
+    "scripts": {
+      "path": "scripts",
+      "purpose": "Build/utility scripts",
+      "fileCount": 1,
+      "lastAccessed": 1776399474436,
+      "keyFiles": [
+        "paper-pm2.sh"
+      ]
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "moonshot/verify.py",
+      "accessCount": 50,
+      "lastAccessed": 1776421812900,
+      "type": "file"
+    },
+    {
+      "path": "moonshot/paper/rolling_scanner.py",
+      "accessCount": 33,
+      "lastAccessed": 1776389773120,
+      "type": "file"
+    },
+    {
+      "path": "moonshot/r24_raw_surge_runner.py",
+      "accessCount": 21,
+      "lastAccessed": 1776422519718,
+      "type": "file"
+    },
+    {
+      "path": "moonshot/paper/paper_store.py",
+      "accessCount": 15,
+      "lastAccessed": 1776334391513,
+      "type": "file"
+    },
+    {
+      "path": "moonshot/paper/live_feed.py",
+      "accessCount": 14,
+      "lastAccessed": 1776387955394,
+      "type": "directory"
+    },
+    {
+      "path": "moonshot/rolling_runner.py",
+      "accessCount": 12,
+      "lastAccessed": 1776401360351,
+      "type": "directory"
+    },
+    {
+      "path": "moonshot/paper/runner.py",
+      "accessCount": 10,
+      "lastAccessed": 1776312128098,
+      "type": "file"
+    },
+    {
+      "path": "moonshot/paper/__main__.py",
+      "accessCount": 10,
+      "lastAccessed": 1776312160074,
+      "type": "file"
+    },
+    {
+      "path": "moonshot/paper/api.py",
+      "accessCount": 8,
+      "lastAccessed": 1776388290542,
+      "type": "directory"
+    },
+    {
+      "path": "backtest_rolling_raw_surge.py",
+      "accessCount": 8,
+      "lastAccessed": 1776421893047,
+      "type": "file"
+    },
+    {
+      "path": "moonshot/paper/paper_account.py",
+      "accessCount": 6,
+      "lastAccessed": 1776334373588,
+      "type": "file"
+    },
+    {
+      "path": "moonshot/paper/position_monitor.py",
+      "accessCount": 5,
+      "lastAccessed": 1776312093715,
+      "type": "file"
+    },
+    {
+      "path": "moonshot/r24_raw_surge_optimizer.py",
+      "accessCount": 5,
+      "lastAccessed": 1776312583331,
+      "type": "file"
+    },
+    {
+      "path": "moonshot/r24_raw_surge_preload.py",
+      "accessCount": 5,
+      "lastAccessed": 1776384369238,
+      "type": "file"
+    },
+    {
+      "path": "moonshot/r24_raw_surge_strategy.py",
+      "accessCount": 5,
+      "lastAccessed": 1776421569466,
+      "type": "file"
+    },
+    {
+      "path": "moonshot/r24_raw_surge_config.py",
+      "accessCount": 5,
+      "lastAccessed": 1776421842114,
+      "type": "file"
+    },
+    {
+      "path": "moonshot/paper",
+      "accessCount": 4,
+      "lastAccessed": 1776312233906,
+      "type": "directory"
+    },
+    {
+      "path": "moonshot/client.py",
+      "accessCount": 4,
+      "lastAccessed": 1776331365365,
+      "type": "directory"
+    },
+    {
+      "path": "moonshot/paper/frontend/src/components/PositionCard.tsx",
+      "accessCount": 4,
+      "lastAccessed": 1776336548455,
+      "type": "file"
+    },
+    {
+      "path": "",
+      "accessCount": 3,
+      "lastAccessed": 1776312576049,
+      "type": "directory"
+    },
+    {
+      "path": "moonshot/runner.py",
+      "accessCount": 3,
+      "lastAccessed": 1776392059395,
+      "type": "directory"
+    },
+    {
+      "path": "config/r24_raw_surge_params.json",
+      "accessCount": 3,
+      "lastAccessed": 1776421842175,
+      "type": "file"
+    },
+    {
+      "path": "moonshot/r24_raw_surge_config_load.py",
+      "accessCount": 3,
+      "lastAccessed": 1776421892993,
+      "type": "directory"
+    },
+    {
+      "path": "moonshot/paper/frontend/src/components/Layout.tsx",
+      "accessCount": 2,
+      "lastAccessed": 1776332834106,
+      "type": "file"
+    },
+    {
+      "path": "moonshot/r24_config_load.py",
+      "accessCount": 2,
+      "lastAccessed": 1776422087692,
+      "type": "file"
+    },
+    {
+      "path": "moonshot/moonshot_config_load.py",
+      "accessCount": 1,
+      "lastAccessed": 1776311491680,
+      "type": "file"
+    },
+    {
+      "path": "moonshot/strategy.py",
+      "accessCount": 1,
+      "lastAccessed": 1776311511975,
+      "type": "file"
+    },
+    {
+      "path": "moonshot/paper/ws_feed.py",
+      "accessCount": 1,
+      "lastAccessed": 1776331325219,
+      "type": "file"
+    },
+    {
+      "path": "moonshot/paper/frontend/src/components/ControlPanel.tsx",
+      "accessCount": 1,
+      "lastAccessed": 1776332816268,
+      "type": "file"
+    },
+    {
+      "path": "moonshot/paper/frontend/src/App.tsx",
+      "accessCount": 1,
+      "lastAccessed": 1776332819307,
+      "type": "file"
+    },
+    {
+      "path": "moonshot/sell_surge_signal.py",
+      "accessCount": 1,
+      "lastAccessed": 1776384379049,
+      "type": "directory"
+    },
+    {
+      "path": "moonshot/export_hourly_gainer_sell_surge.py",
+      "accessCount": 1,
+      "lastAccessed": 1776385126540,
+      "type": "directory"
+    },
+    {
+      "path": "jchc.py",
+      "accessCount": 1,
+      "lastAccessed": 1776399952224,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}

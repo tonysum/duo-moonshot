@@ -32,6 +32,8 @@ def headers(variant: Variant) -> list[str]:
         "交易对",
         "建仓价格",
         surge_col,
+        "卖量倍数",
+        "昨日小时均卖",
         "仓位大小",
         "杠杆倍数",
         "止盈价(初始)",
@@ -104,6 +106,10 @@ def trade_row(t: dict[str, Any], variant: Variant) -> list[Any]:
         except (TypeError, ValueError):
             fund_cell = ""
 
+    # 卖量相关字段（与回测 CSV 对齐）
+    sell_surge_ratio = t.get("sell_surge_ratio")
+    yesterday_avg_hour_sell_volume = t.get("yesterday_avg_hour_sell_volume")
+
     return [
         entry_ts,
         round(float(sig_px), 8) if sig_px is not None else "",
@@ -111,6 +117,8 @@ def trade_row(t: dict[str, Any], variant: Variant) -> list[Any]:
         t.get("symbol", ""),
         entry_px,
         t.get("surge_pct", ""),
+        round(float(sell_surge_ratio), 4) if sell_surge_ratio is not None else "",
+        round(float(yesterday_avg_hour_sell_volume), 2) if yesterday_avg_hour_sell_volume is not None else "",
         t.get("position_size", ""),
         t.get("leverage", ""),
         round(float(tp_init), 8) if tp_init is not None else "",

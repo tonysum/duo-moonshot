@@ -11,6 +11,12 @@ the package parent may not contain these files; behavior falls through safely.
 
 JSON may be optimizer shape ``{"phase", "score", "params": {...}}`` or a flat object
 of RollingConfig fields. ``main_profit_thresholds`` may be a JSON list of pairs.
+
+Sizing alias: ``fixed_margin_usd`` is accepted and mapped to ``fixed_invest_usd`` when the
+latter is omitted or null (use with ``position_sizing_mode``: ``"fixed_usd"``).
+
+Sell surge (AND with R24, hm1l-aligned): optional keys ``enable_sell_surge_gate``,
+``sell_surge_threshold``, ``sell_surge_max``.
 """
 
 from __future__ import annotations
@@ -46,8 +52,13 @@ def _rolling_config_search_roots() -> list[Path]:
 
 def _raw_params_from_parsed_json(data: dict[str, Any]) -> dict[str, Any]:
     if isinstance(data.get("params"), dict):
-        return dict(data["params"])
-    return {k: v for k, v in data.items() if k not in ("phase", "score")}
+        raw = dict(data["params"])
+    else:
+        raw = {k: v for k, v in data.items() if k not in ("phase", "score")}
+    if raw.get("fixed_invest_usd") is None and raw.get("fixed_margin_usd") is not None:
+        raw["fixed_invest_usd"] = raw["fixed_margin_usd"]
+    raw.pop("fixed_margin_usd", None)
+    return raw
 
 
 def _coerce_main_profit_thresholds(val: Any) -> list[tuple[float, float]]:

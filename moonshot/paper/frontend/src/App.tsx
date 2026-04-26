@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Layout, type ScanSnapshot } from './components/Layout';
+import { Layout, type FeedHealthSnapshot, type ScanSnapshot } from './components/Layout';
 import { PositionCard } from './components/PositionCard';
 import { ControlPanel } from './components/ControlPanel';
 import { TradesView } from './components/TradesView';
@@ -14,6 +14,7 @@ function App() {
   const [positions, setPositions] = useState<any>([]);
   const [prices, setPrices] = useState<Record<string, number>>({});
   const [wsConnected, setWsConnected] = useState(false);
+  const [feedHealth, setFeedHealth] = useState<FeedHealthSnapshot | null>(null);
   const [logs, setLogs] = useState<any[]>([]);
   const [pendingSt, setPendingSt] = useState<any[]>([]);
   const [gainers, setGainers] = useState<any[]>([]);
@@ -23,7 +24,13 @@ function App() {
   const prevTradeCount = useRef(0);
 
   const displayStatus = mode === 'dual' && status?.daily != null
-    ? { capital: status[activeStrategy]?.capital ?? 0, open_positions: status[activeStrategy]?.open_positions ?? 0, total_trades: status[activeStrategy]?.total_trades ?? 0, running: status.running }
+    ? {
+        capital: status[activeStrategy]?.capital ?? 0,
+        open_positions: status[activeStrategy]?.open_positions ?? 0,
+        total_trades: status[activeStrategy]?.total_trades ?? 0,
+        realized_pnl: status[activeStrategy]?.realized_pnl ?? 0,
+        running: status.running,
+      }
     : status;
   const displayPositions = mode === 'dual' && positions && typeof positions === 'object' && !Array.isArray(positions)
     ? (positions[activeStrategy] ?? [])
@@ -62,6 +69,9 @@ function App() {
       setPositions(data.positions ?? (data.mode === 'dual' ? { daily: [], rolling: [] } : []));
       setPrices(data.prices || {});
       setWsConnected(data.ws_connected ?? false);
+      if (data.feed_health && typeof data.feed_health === 'object') {
+        setFeedHealth(data.feed_health as FeedHealthSnapshot);
+      }
       setLoading(false);
       if (Array.isArray(data.top_gainers)) setGainers(data.top_gainers);
       if (data.scan_results !== undefined) setScanResult(data.scan_results);
@@ -116,6 +126,7 @@ function App() {
       gainers={gainers}
       scanResult={showDualScanFooter ? undefined : scanResult}
       scanResultsDual={scanResultsDual}
+      feedHealth={feedHealth}
     >
       <div className="grid grid-cols-1 md:grid-cols-12 gap-6 md:gap-8">
         <div className="md:col-span-9">
@@ -144,7 +155,7 @@ function App() {
                     {displayStatus?.running ? 'RUNNING' : 'STOPPED'}
                   </span>
                 </h2>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
                   <div className="p-4 brut-border bg-slate-50 dark:bg-gray-800">
                     <p className="text-xs font-bold text-muted-foreground uppercase">Current Capital</p>
                     <p className="text-3xl font-black">${(displayStatus?.capital ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
@@ -156,6 +167,20 @@ function App() {
                   <div className="p-4 brut-border bg-slate-50 dark:bg-gray-800">
                     <p className="text-xs font-bold text-muted-foreground uppercase">Total Trades</p>
                     <p className="text-3xl font-black">{displayStatus?.total_trades ?? 0}</p>
+                  </div>
+                  <div className="p-4 brut-border bg-slate-50 dark:bg-gray-800">
+                    <p className="text-xs font-bold text-muted-foreground uppercase">Realized PnL</p>
+                    <p className={`text-3xl font-black ${(displayStatus?.realized_pnl ?? 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                      {(displayStatus?.realized_pnl ?? 0) >= 0 ? '+' : ''}
+                      ${Math.abs(displayStatus?.realized_pnl ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </p>
+                  </div>
+                  <div className="p-4 brut-border bg-slate-50 dark:bg-gray-800">
+                    <p className="text-xs font-bold text-muted-foreground uppercase">Unrealized PnL</p>
+                    <p className={`text-3xl font-black ${(displayPositions?.reduce((sum: number, p: any) => sum + (p.unrealized_pnl || 0), 0) ?? 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                      {(displayPositions?.reduce((sum: number, p: any) => sum + (p.unrealized_pnl || 0), 0) ?? 0) >= 0 ? '+' : ''}
+                      ${Math.abs(displayPositions?.reduce((sum: number, p: any) => sum + (p.unrealized_pnl || 0), 0) ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </p>
                   </div>
                 </div>
               </section>
@@ -227,10 +252,21 @@ function App() {
                   <span className="text-muted-foreground block text-[8px] mb-1">
                     {new Date(log.timestamp).toLocaleString()}
                   </span>
-                  <span className={`font-bold mr-2 text-[9px] ${log.event_type === 'ENTRY' ? 'text-blue-600' :
-                    log.event_type === 'EXIT' ? 'text-purple-600' :
-                    log.event_type === 'SCAN' ? 'text-orange-600' : 'text-gray-600'
-                  }`}>
+                  <span
+                    className={`font-bold mr-2 text-[9px] ${
+                      log.event_type === 'OPEN' || log.event_type === 'ENTRY'
+                        ? 'text-blue-600'
+                        : log.event_type === 'CLOSE' || log.event_type === 'EXIT'
+                          ? 'text-purple-600'
+                          : log.event_type === 'ADD'
+                            ? 'text-cyan-600'
+                            : log.event_type === 'RUN'
+                              ? 'text-emerald-600'
+                              : log.event_type === 'SCAN'
+                                ? 'text-orange-600'
+                                : 'text-gray-600'
+                    }`}
+                  >
                     [{log.event_type}]
                   </span>
                   {log.symbol && <span className="font-black mr-2">{log.symbol}</span>}

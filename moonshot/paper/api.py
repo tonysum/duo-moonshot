@@ -4,28 +4,25 @@
 from __future__ import annotations
 
 import asyncio
+import csv
 import json
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
+from io import StringIO
 
-from fastapi import BackgroundTasks, FastAPI, Query
+from fastapi import BackgroundTasks, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
-from moonshot.paper.runner import DualPaperRunner, PaperRunner
+from moonshot.paper.runner import PaperRunner
 from moonshot.paper.trades_csv import build_trades_csv
-from moonshot.rolling_strategy import RollingConfig
 
 logger = logging.getLogger(__name__)
 
 # Registered by __main__.py
-_runner: PaperRunner | DualPaperRunner | None = None
-
-
-def _is_dual_run() -> bool:
-    return isinstance(_runner, DualPaperRunner)
+_runner: PaperRunner | None = None
 
 
 def _merge_tick_into_price_extremes(d: dict) -> None:
@@ -59,26 +56,18 @@ class StatusResponse(BaseModel):
     capital: float
     open_positions: int
     total_trades: int
+    realized_pnl: float = 0.0
 
 @app.get("/status")
 async def get_status():
     if not _runner:
-        return {"running": False, "capital": 0.0, "open_positions": 0, "total_trades": 0, "mode": "single"}
-
-    if _is_dual_run():
         return {
-            "running": _runner._running,
-            "mode": "dual",
-            "daily": {
-                "capital": float(_runner.daily_account.capital),
-                "open_positions": _runner.daily_store.position_count(),
-                "total_trades": _runner.daily_store.get_trade_count(),
-            },
-            "rolling": {
-                "capital": float(_runner.rolling_account.capital),
-                "open_positions": _runner.rolling_store.position_count(),
-                "total_trades": _runner.rolling_store.get_trade_count(),
-            },
+            "running": False,
+            "capital": 0.0,
+            "open_positions": 0,
+            "total_trades": 0,
+            "realized_pnl": 0.0,
+            "mode": "single",
         }
     return {
         "running": _runner._running,
@@ -86,12 +75,13 @@ async def get_status():
         "capital": float(_runner.account.capital),
         "open_positions": _runner.store.position_count(),
         "total_trades": _runner.store.get_trade_count(),
+        "realized_pnl": _runner.store.total_realized_pnl(),
     }
 
 @app.get("/positions")
-async def get_positions(strategy: str | None = Query(None, description="daily|rolling (dual mode only)")):
+async def get_positions():
     if not _runner:
-        return [] if not _is_dual_run() else {"daily": [], "rolling": []}
+        return []
 
     async def _enrich(positions, store_key: str = ""):
         out = []
@@ -113,67 +103,25 @@ async def get_positions(strategy: str | None = Query(None, description="daily|ro
             out.append(d)
         return out
 
-    if _is_dual_run():
-        if strategy == "daily":
-            return await _enrich(_runner.daily_store.get_open_positions(), "daily")
-        if strategy == "rolling":
-            return await _enrich(_runner.rolling_store.get_open_positions(), "rolling")
-        return {
-            "daily": await _enrich(_runner.daily_store.get_open_positions(), "daily"),
-            "rolling": await _enrich(_runner.rolling_store.get_open_positions(), "rolling"),
-        }
-
     positions = _runner.store.get_open_positions()
     return await _enrich(positions)
 
 @app.get("/trades")
-async def get_trades(limit: int = 50, strategy: str | None = Query(None, description="daily|rolling (dual mode only)")):
+async def get_trades(limit: int = 50):
     if not _runner:
-        return [] if not _is_dual_run() else {"daily": [], "rolling": []}
-    if _is_dual_run():
-        if strategy == "daily":
-            return _runner.daily_store.get_trades(limit=limit)
-        if strategy == "rolling":
-            return _runner.rolling_store.get_trades(limit=limit)
-        return {
-            "daily": _runner.daily_store.get_trades(limit=limit),
-            "rolling": _runner.rolling_store.get_trades(limit=limit),
-        }
+        return []
     return _runner.store.get_trades(limit=limit)
 
 @app.get("/logs")
-async def get_logs(limit: int = 100, strategy: str | None = Query(None, description="daily|rolling (dual mode only)")):
+async def get_logs(limit: int = 100):
     if not _runner:
         return []
-    if _is_dual_run():
-        if strategy == "daily":
-            return _runner.daily_store.get_events(limit=limit)
-        if strategy == "rolling":
-            return _runner.rolling_store.get_events(limit=limit)
-        # Merge both, sort by timestamp desc (events have timestamp)
-        d = _runner.daily_store.get_events(limit=limit)
-        r = _runner.rolling_store.get_events(limit=limit)
-        for e in d:
-            e["strategy"] = "daily"
-        for e in r:
-            e["strategy"] = "rolling"
-        merged = sorted(d + r, key=lambda x: x.get("timestamp", ""), reverse=True)
-        return merged[:limit]
     return _runner.store.get_events(limit=limit)
 
 @app.get("/equity")
-async def get_equity(strategy: str | None = Query(None, description="daily|rolling (dual mode only)")):
+async def get_equity():
     if not _runner:
-        return [] if not _is_dual_run() else {"daily": [], "rolling": []}
-    if _is_dual_run():
-        if strategy == "daily":
-            return _runner.daily_store.get_equity_curve()
-        if strategy == "rolling":
-            return _runner.rolling_store.get_equity_curve()
-        return {
-            "daily": _runner.daily_store.get_equity_curve(),
-            "rolling": _runner.rolling_store.get_equity_curve(),
-        }
+        return []
     return _runner.store.get_equity_curve()
 
 @app.post("/start")
@@ -187,38 +135,62 @@ async def stop_runner():
     return {"message": "Stopped"}
 
 @app.post("/scan")
-async def trigger_scan(background_tasks: BackgroundTasks, strategy: str | None = Query(None)):
+async def trigger_scan(background_tasks: BackgroundTasks):
     if not _runner:
         return {"message": "Runner not started"}
-    if _is_dual_run():
-        if strategy == "daily":
-            background_tasks.add_task(_runner.daily_scanner.scan)
-        elif strategy == "rolling":
-            background_tasks.add_task(_runner.rolling_scanner.scan)
-        else:
-            background_tasks.add_task(_runner.daily_scanner.scan)
-            background_tasks.add_task(_runner.rolling_scanner.scan)
-    else:
-        background_tasks.add_task(_runner.scanner.scan)
+    if not bool(getattr(_runner.config, "manual_scan_enabled", True)):
+        return {"message": "Manual scan disabled by config"}
+    background_tasks.add_task(_runner.scanner.scan)
     return {"message": "Scan scheduled"}
 
 @app.get("/pending_st")
-async def get_pending_st(strategy: str | None = Query(None)):
+async def get_pending_st():
     if not _runner:
         return []
-    if _is_dual_run():
-        if strategy == "rolling":
-            return []  # Rolling has no ST gate
-        return [s.model_dump() for s in _runner.daily_store.get_pending_st_signals()]
     return [s.model_dump() for s in _runner.store.get_pending_st_signals()]
 
 _top_gainers_cache: dict = {"data": [], "ts": 0}
 _TOP_GAINERS_BUFFER = 120  # refresh 2 min after each hour boundary
+# SSE 每 2s 调一次刷新；空缓存或断网时避免每 2s 打一次 WARNING
+_top_gainers_backoff_until: float = 0.0
+_top_gainers_last_fail_log_ts: float = 0.0
+_TOP_GAINERS_FAIL_BACKOFF_START = 30.0
+_TOP_GAINERS_FAIL_LOG_INTERVAL = 300.0  # 同期最多一条 WARNING，其余打 debug
+
+# 供前端展示（与终端日志解耦，断网/退避时仍可见最近错误）
+_feed_health: dict = {
+    "top_gainers_ok": True,
+    "top_gainers_error": None,  # type: str | None
+    "top_gainers_error_at": None,  # ISO
+    "top_gainers_last_ok_at": None,  # ISO
+}
+
+
+def _feed_health_snapshot() -> dict:
+    if not _runner:
+        return {
+            "mark_prices_ws": False,
+            "top_gainers_ok": bool(_feed_health.get("top_gainers_ok", True)),
+            "top_gainers_error": _feed_health.get("top_gainers_error"),
+            "top_gainers_error_at": _feed_health.get("top_gainers_error_at"),
+            "top_gainers_last_ok_at": _feed_health.get("top_gainers_last_ok_at"),
+        }
+    return {
+        "mark_prices_ws": _runner.ws_feed.is_connected,
+        "top_gainers_ok": bool(_feed_health.get("top_gainers_ok", True)),
+        "top_gainers_error": _feed_health.get("top_gainers_error"),
+        "top_gainers_error_at": _feed_health.get("top_gainers_error_at"),
+        "top_gainers_last_ok_at": _feed_health.get("top_gainers_last_ok_at"),
+    }
+
 
 async def _refresh_top_gainers_if_stale():
     """Refresh top gainers when cache is older than 1 hour (a bit past hour boundary)."""
+    global _top_gainers_backoff_until, _top_gainers_last_fail_log_ts
     import time
     now = time.time()
+    if now < _top_gainers_backoff_until:
+        return
     ts = _top_gainers_cache.get("ts", 0)
     # Refresh when: cache empty, or we've passed an hour boundary + 2 min
     if not _top_gainers_cache["data"] or ts == 0:
@@ -227,30 +199,45 @@ async def _refresh_top_gainers_if_stale():
         last_hour = int(ts / 3600)
         next_refresh = (last_hour + 1) * 3600 + _TOP_GAINERS_BUFFER
         need_refresh = now >= next_refresh
-    if need_refresh:
-        if not _runner:
-            return
-        try:
-            tradeable = set(await _runner.feed.get_usdt_symbols())  # 仅 TRADING 状态，排除 SETTLING/下架中
-            tickers = await _runner.client.get_24hr_tickers()
-            usdt_perps = [
-                t for t in tickers
-                if t.get("symbol", "") in tradeable
-                and float(t.get("priceChangePercent", 0)) > 0
-            ]
-            usdt_perps.sort(key=lambda t: float(t.get("priceChangePercent", 0)), reverse=True)
-            _top_gainers_cache["data"] = [
-                {
-                    "symbol": t["symbol"],
-                    "pct_chg": round(float(t["priceChangePercent"]), 2),
-                    "price": t.get("lastPrice", "0"),
-                    "volume": round(float(t.get("quoteVolume", 0)) / 1e8, 2),
-                }
-                for t in usdt_perps[:10]
-            ]
-            _top_gainers_cache["ts"] = time.time()
-        except Exception as e:
-            logger.warning("top_gainers refresh failed: %s", e)
+    if not need_refresh:
+        return
+    if not _runner:
+        return
+    try:
+        tradeable = set(await _runner.feed.get_usdt_symbols())  # 仅 TRADING 状态，排除 SETTLING/下架中
+        tickers = await _runner.client.get_24hr_tickers()
+        usdt_perps = [
+            t for t in tickers
+            if t.get("symbol", "") in tradeable
+            and float(t.get("priceChangePercent", 0)) > 0
+        ]
+        usdt_perps.sort(key=lambda t: float(t.get("priceChangePercent", 0)), reverse=True)
+        _top_gainers_cache["data"] = [
+            {
+                "symbol": t["symbol"],
+                "pct_chg": round(float(t["priceChangePercent"]), 2),
+                "price": t.get("lastPrice", "0"),
+                "volume": round(float(t.get("quoteVolume", 0)) / 1e8, 2),
+            }
+            for t in usdt_perps[:10]
+        ]
+        _top_gainers_cache["ts"] = time.time()
+        _top_gainers_backoff_until = 0.0
+        _feed_health["top_gainers_ok"] = True
+        _feed_health["top_gainers_error"] = None
+        _feed_health["top_gainers_error_at"] = None
+        _feed_health["top_gainers_last_ok_at"] = datetime.now(UTC).isoformat()
+    except Exception as e:
+        _top_gainers_backoff_until = time.time() + _TOP_GAINERS_FAIL_BACKOFF_START
+        err_s = str(e)[:500]
+        _feed_health["top_gainers_ok"] = False
+        _feed_health["top_gainers_error"] = err_s
+        _feed_health["top_gainers_error_at"] = datetime.now(UTC).isoformat()
+        if time.time() - _top_gainers_last_fail_log_ts >= _TOP_GAINERS_FAIL_LOG_INTERVAL:
+            _top_gainers_last_fail_log_ts = time.time()
+            logger.warning("top_gainers refresh failed: %s (重试前退避 %ds，期间同错误仅 debug)", e, int(_TOP_GAINERS_FAIL_BACKOFF_START))
+        else:
+            logger.debug("top_gainers refresh failed: %s", e)
 
 @app.get("/top_gainers")
 async def get_top_gainers():
@@ -258,32 +245,41 @@ async def get_top_gainers():
     await _refresh_top_gainers_if_stale()
     return _top_gainers_cache["data"]
 
+@app.get("/sell_surge_rank")
+async def get_sell_surge_rank():
+    """Return all USDT perps ranked by last-hour sell surge ratio (descending), with 24hr pct change."""
+    if not _runner:
+        return []
+    return await _runner.feed.scan_sell_surge_rank()
+
+@app.get("/sell_surge_rank.csv")
+async def get_sell_surge_rank_csv():
+    """Export last-hour sell surge rank as CSV."""
+    if not _runner:
+        return Response(content="", media_type="text/csv")
+    rows = await _runner.feed.scan_sell_surge_rank()
+    buf = StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["symbol", "sell_surge_ratio", "yesterday_avg_hour_sell_volume", "pct_chg_24h"])
+    for r in rows:
+        writer.writerow([
+            r["symbol"],
+            r["sell_surge_ratio"],
+            r["yesterday_avg_hour_sell_volume"] if r["yesterday_avg_hour_sell_volume"] is not None else "",
+            r["pct_chg_24h"],
+        ])
+    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=sell_surge_rank_{ts}.csv"},
+    )
+
 @app.get("/scan_results")
-async def get_scan_results(strategy: str | None = Query(None, description="daily|rolling (dual mode only)")):
+async def get_scan_results():
     """Return last scan snapshot (gainers + filter status)."""
     if not _runner:
         return None
-    if _is_dual_run():
-        if strategy == "daily":
-            raw = _runner.daily_store.get_state("last_scan")
-        elif strategy == "rolling":
-            raw = _runner.rolling_store.get_state("last_scan")
-        else:
-            raw_d = _runner.daily_store.get_state("last_scan")
-            raw_r = _runner.rolling_store.get_state("last_scan")
-            try:
-                return {
-                    "daily": json.loads(raw_d) if raw_d else None,
-                    "rolling": json.loads(raw_r) if raw_r else None,
-                }
-            except Exception:
-                return {"daily": None, "rolling": None}
-        if not raw:
-            return None
-        try:
-            return json.loads(raw)
-        except Exception:
-            return None
     raw = _runner.store.get_state("last_scan")
     if not raw:
         return None
@@ -291,6 +287,80 @@ async def get_scan_results(strategy: str | None = Query(None, description="daily
         return json.loads(raw)
     except Exception:
         return None
+
+
+@app.get("/scan_times")
+async def get_scan_times(limit: int = 50):
+    """List recent scan_time values that have saved signal details."""
+    if not _runner:
+        return []
+    return _runner.store.list_scan_times(limit=limit)
+
+
+@app.get("/scan_signals")
+async def get_scan_signals(scan_time: str, limit: int = 5000):
+    """Get full signal details for a specific scan_time."""
+    if not _runner:
+        return []
+    return _runner.store.get_scan_signals(scan_time, limit=limit)
+
+@app.get("/export_signals_csv")
+async def export_signals_csv(scan_time: str | None = None, limit: int = 5000):
+    """Export scan signal details as CSV. If scan_time is omitted, export latest."""
+    if not _runner:
+        return Response("Runner not started", status_code=400, media_type="text/plain")
+
+    if scan_time is None or not str(scan_time).strip():
+        times = _runner.store.list_scan_times(limit=1)
+        if not times:
+            return Response("No scan_signals found", status_code=404, media_type="text/plain")
+        scan_time = times[0]
+
+    rows = _runner.store.get_scan_signals(scan_time, limit=limit)
+    if not rows:
+        return Response("No scan_signals found for scan_time", status_code=404, media_type="text/plain")
+
+    # Build CSV columns from union of keys (stable, readable order).
+    preferred = [
+        "scan_time",
+        "symbol",
+        "pct_chg",
+        "filter_result",
+        "sell_surge_ratio",
+        "yesterday_avg_hour_sell_volume",
+        "listed_days",
+        "profit_threshold",
+    ]
+    keys: set[str] = set()
+    for r in rows:
+        if isinstance(r, dict):
+            keys.update(r.keys())
+    # Always include scan_time column (even though per-row data doesn't carry it).
+    keys.discard("scan_time")
+    rest = sorted(k for k in keys if k not in preferred)
+    fieldnames = preferred + rest
+
+    def _cell(v):
+        if v is None:
+            return ""
+        if isinstance(v, (dict, list)):
+            return json.dumps(v, ensure_ascii=False)
+        return str(v)
+
+    buf = StringIO()
+    w = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
+    w.writeheader()
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        out = {"scan_time": scan_time}
+        out.update(r)
+        w.writerow({k: _cell(out.get(k)) for k in fieldnames})
+    csv_text = buf.getvalue()
+
+    filename = f"signals_{scan_time.replace(':','').replace('-','').replace('T','_')}.csv"
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return Response(content=csv_text, media_type="text/csv; charset=utf-8", headers=headers)
 
 @app.get("/prices")
 async def get_prices():
@@ -349,73 +419,33 @@ async def stream_data():
 
                 asyncio.create_task(_refresh_top_gainers_if_stale())
 
-                if _is_dual_run():
-                    pos_daily = await _build_pos_list(_runner.daily_store.get_open_positions())
-                    pos_rolling = await _build_pos_list(_runner.rolling_store.get_open_positions())
-                    for d in pos_daily:
-                        d["strategy"] = "daily"
-                    for d in pos_rolling:
-                        d["strategy"] = "rolling"
-                    raw_d = _runner.daily_store.get_state("last_scan")
-                    raw_r = _runner.rolling_store.get_state("last_scan")
-                    try:
-                        scan_d = json.loads(raw_d) if raw_d else None
-                    except (json.JSONDecodeError, TypeError):
-                        scan_d = None
-                    try:
-                        scan_r = json.loads(raw_r) if raw_r else None
-                    except (json.JSONDecodeError, TypeError):
-                        scan_r = None
-                    payload = {
-                        "mode": "dual",
-                        "status": {
-                            "running": _runner._running,
-                            "daily": {
-                                "capital": float(_runner.daily_account.capital),
-                                "open_positions": _runner.daily_store.position_count(),
-                                "total_trades": _runner.daily_store.get_trade_count(),
-                            },
-                            "rolling": {
-                                "capital": float(_runner.rolling_account.capital),
-                                "open_positions": _runner.rolling_store.position_count(),
-                                "total_trades": _runner.rolling_store.get_trade_count(),
-                            },
-                        },
-                        "positions": {"daily": pos_daily, "rolling": pos_rolling},
-                        "prices": dict(
-                            (s, round(p, 2)) for s in ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT"]
-                            for p in [_runner.ws_feed.get_price(s)] if p is not None
-                        ),
-                        "ws_connected": _runner.ws_feed.is_connected,
-                        "top_gainers": _top_gainers_cache["data"],
-                        "scan_results": {"daily": scan_d, "rolling": scan_r},
-                    }
-                else:
-                    pos_list = await _build_pos_list(_runner.store.get_open_positions())
-                    raw_scan = _runner.store.get_state("last_scan")
-                    try:
-                        scan_results = json.loads(raw_scan) if raw_scan else None
-                    except (json.JSONDecodeError, TypeError):
-                        scan_results = None
-                    ticker = {}
-                    for sym in ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT"]:
-                        pr = _runner.ws_feed.get_price(sym)
-                        if pr:
-                            ticker[sym] = round(pr, 2)
-                    payload = {
-                        "mode": "single",
-                        "status": {
-                            "running": _runner._running,
-                            "capital": float(_runner.account.capital),
-                            "open_positions": _runner.store.position_count(),
-                            "total_trades": _runner.store.get_trade_count(),
-                        },
-                        "positions": pos_list,
-                        "prices": ticker,
-                        "ws_connected": _runner.ws_feed.is_connected,
-                        "top_gainers": _top_gainers_cache["data"],
-                        "scan_results": scan_results,
-                    }
+                pos_list = await _build_pos_list(_runner.store.get_open_positions())
+                raw_scan = _runner.store.get_state("last_scan")
+                try:
+                    scan_results = json.loads(raw_scan) if raw_scan else None
+                except (json.JSONDecodeError, TypeError):
+                    scan_results = None
+                ticker = {}
+                for sym in ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT"]:
+                    pr = _runner.ws_feed.get_price(sym)
+                    if pr:
+                        ticker[sym] = round(pr, 2)
+                payload = {
+                    "mode": "single",
+                    "status": {
+                        "running": _runner._running,
+                        "capital": float(_runner.account.capital),
+                        "open_positions": _runner.store.position_count(),
+                        "total_trades": _runner.store.get_trade_count(),
+                        "realized_pnl": _runner.store.total_realized_pnl(),
+                    },
+                    "positions": pos_list,
+                    "prices": ticker,
+                    "ws_connected": _runner.ws_feed.is_connected,
+                    "top_gainers": _top_gainers_cache["data"],
+                    "scan_results": scan_results,
+                    "feed_health": _feed_health_snapshot(),
+                }
                 yield f"data: {json.dumps(payload, default=str)}\n\n"
                 await asyncio.sleep(2)
         except asyncio.CancelledError:
@@ -424,27 +454,12 @@ async def stream_data():
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 @app.get("/summary")
-async def get_summary(strategy: str | None = Query(None, description="daily|rolling (dual mode only)")):
+async def get_summary():
     """Compute aggregated performance metrics from all closed trades."""
     if not _runner:
         return {"error": "Runner not initialized"}
 
-    if _is_dual_run():
-        if strategy == "daily":
-            store, account = _runner.daily_store, _runner.daily_account
-        elif strategy == "rolling":
-            store, account = _runner.rolling_store, _runner.rolling_account
-        else:
-            # Return both
-            daily_res = await _summary_for_store(
-                _runner.daily_store, _runner.daily_account,
-            )
-            rolling_res = await _summary_for_store(
-                _runner.rolling_store, _runner.rolling_account,
-            )
-            return {"mode": "dual", "daily": daily_res, "rolling": rolling_res}
-    else:
-        store, account = _runner.store, _runner.account
+    store, account = _runner.store, _runner.account
 
     return await _summary_for_store(store, account)
 
@@ -579,28 +594,15 @@ async def _summary_for_store(store, account):
 
 @app.get("/export/trades.csv")
 async def export_paper_trades_csv(
-    strategy: str | None = Query(None, description="dual 模式必填: daily | rolling"),
-    include_summary: bool = Query(True, description="是否在表尾附加 Summary 段"),
+    include_summary: bool = True,
 ):
     """已平仓明细 CSV，列与 `moonshot/runner.py` / `rolling_runner.py` 的 export_csv 一致（UTF-8 BOM）。"""
     if not _runner:
         return Response("Runner not initialized", status_code=503, media_type="text/plain")
 
-    if _is_dual_run():
-        if strategy not in ("daily", "rolling"):
-            return Response(
-                "Dual mode: add query ?strategy=daily or ?strategy=rolling",
-                status_code=400,
-                media_type="text/plain",
-            )
-        store = _runner.daily_store if strategy == "daily" else _runner.rolling_store
-        account = _runner.daily_account if strategy == "daily" else _runner.rolling_account
-        variant = "daily" if strategy == "daily" else "rolling"
-        fname_prefix = f"moonshot_paper_{strategy}"
-    else:
-        store, account = _runner.store, _runner.account
-        variant = "rolling" if isinstance(_runner.config, RollingConfig) else "daily"
-        fname_prefix = "moonshot_paper"
+    store, account = _runner.store, _runner.account
+    variant = "rolling"
+    fname_prefix = "moonshot_paper"
 
     trades = store.get_trades(limit=99999)
     summary_lines: list[tuple[str, object]] | None = None

@@ -20,6 +20,9 @@ interface PositionProps {
   highest_price?: number | null;
   has_added_position?: boolean;
   surge_pct?: number;
+  sell_surge_ratio?: number | null;
+  /** 入场时昨日 UTC 日均每小时主动卖额（quote），与回测 CSV 一致 */
+  yesterday_avg_hour_sell_volume?: number | null;
   strategy?: string;
 }
 
@@ -53,15 +56,6 @@ export const PositionCard: React.FC<PositionProps> = (pos) => {
     ? ((pos.sl_price - pos.current_price) / pos.current_price * 100).toFixed(1)
     : null;
 
-  const highWater =
-    pos.highest_price != null && pos.highest_price > 0
-      ? Math.max(pos.highest_price, pos.current_price)
-      : Math.max(pos.entry_price, pos.current_price);
-  const slRoomFromHigh =
-    pos.sl_price > 0 && highWater > 0
-      ? ((pos.sl_price - highWater) / highWater * 100).toFixed(2)
-      : null;
-
   const range = pos.entry_price - pos.tp_price;
   const moved = pos.entry_price - pos.current_price;
   const progress = range !== 0 ? Math.min(100, Math.max(-50, (moved / range) * 100)) : 0;
@@ -92,7 +86,14 @@ export const PositionCard: React.FC<PositionProps> = (pos) => {
             <span>⏱ {holdStr}</span>
             <span>·</span>
             <span>{pos.leverage}× SHORT</span>
-            {pos.surge_pct != null && <span className="text-emerald-600">+{pos.surge_pct.toFixed(0)}%</span>}
+            {pos.surge_pct != null && (
+              <span className="text-emerald-600">+{pos.surge_pct.toFixed(2)}%</span>
+            )}
+            {pos.sell_surge_ratio != null && pos.sell_surge_ratio > 0 && (
+              <span className="text-orange-600">
+                卖量×{pos.sell_surge_ratio.toFixed(2)}
+              </span>
+            )}
           </div>
           {pos.entry_reason && (
             <p className="text-[10px] text-muted-foreground mt-0.5">{pos.entry_reason}</p>
@@ -121,17 +122,23 @@ export const PositionCard: React.FC<PositionProps> = (pos) => {
           <p className="text-[10px] uppercase font-bold text-muted-foreground">Current</p>
           <p className="font-black">${fmtPrice(pos.current_price)}</p>
         </div>
-        <div>
-          <p className="text-[10px] uppercase font-bold text-muted-foreground">TP / SL (price)</p>
-          <p className="font-black text-xs">
-            TP ${fmtPrice(pos.tp_price)} / SL ${fmtPrice(pos.sl_price)}
-          </p>
-        </div>
-        <div>
-          <p className="text-[10px] uppercase font-bold text-muted-foreground">TP / SL (%)</p>
-          <p className="font-black text-xs">
-            {pos.target_pct != null ? pos.target_pct : '—'}% / {pos.stop_loss_pct != null ? pos.stop_loss_pct : '—'}%
-          </p>
+        <div className="col-span-2">
+          <div className="flex gap-4">
+            <div className="flex-1">
+              <p className="text-[10px] uppercase font-bold text-muted-foreground">TP Price</p>
+              <p className="font-black text-sm text-emerald-600">
+                ${fmtPrice(pos.tp_price)}
+                <span className="text-xs ml-1 text-emerald-500">({pos.target_pct != null ? pos.target_pct : '—'}%)</span>
+              </p>
+            </div>
+            <div className="flex-1">
+              <p className="text-[10px] uppercase font-bold text-muted-foreground">SL Price</p>
+              <p className="font-black text-sm text-red-600">
+                ${fmtPrice(pos.sl_price)}
+                <span className="text-xs ml-1 text-red-500">({pos.stop_loss_pct != null ? pos.stop_loss_pct : '—'}%)</span>
+              </p>
+            </div>
+          </div>
         </div>
         <div>
           <p className="text-[10px] uppercase font-bold text-muted-foreground">Unrealized PnL</p>
@@ -171,19 +178,11 @@ export const PositionCard: React.FC<PositionProps> = (pos) => {
               Low: ${fmtPrice(pos.lowest_price)}
             </span>
           )}
-          <span
-            className="bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 px-2 py-0.5 brut-border"
-            title="空仓：持仓以来最高价 vs 止损价余量（%）；≤0 表示峰值已触及或超过止损价"
-          >
-            High: ${fmtPrice(highWater)}
-            {slRoomFromHigh != null && (
-              <span className={Number(slRoomFromHigh) <= 0 ? ' font-bold' : ''}>
-                {' '}
-                · vs SL: {Number(slRoomFromHigh) > 0 ? '+' : ''}
-                {slRoomFromHigh}%
-              </span>
-            )}
-          </span>
+          {pos.highest_price != null && pos.highest_price > 0 && (
+            <span className="bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-400 px-2 py-0.5 brut-border">
+              High: ${fmtPrice(pos.highest_price)}
+            </span>
+          )}
         </div>
       </div>
     </div>

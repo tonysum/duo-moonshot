@@ -27,10 +27,10 @@ class RollingConfig:
     min_pct_chg: float = 5.0             # 最小涨幅要求 5%
     min_listed_days: int = 10             # 新币过滤
     signal_cooldown_hours: int = 8       # 同币种信号冷却期(小时), 可调
-    rolling_window_hours: int = 42        # 滚动窗口大小(小时), 可调
+    rolling_window_hours: int = 24        # 滚动窗口大小(小时), 可调
     scan_interval_hours: int = 2          # 扫描间隔(小时), 1=每小时, 4=每4小时
 
-    enable_main_profit_check: bool = True     # 主力获利检查
+    enable_main_profit_check: bool = False     # 主力获利检查
     main_profit_thresholds: list = field(default_factory=lambda: [
         (40,  51),
         (60,  45),
@@ -38,6 +38,11 @@ class RollingConfig:
     ])
 
     # ── 2. Entry Filters (门控) ──────────────────────────────────────
+    # 卖量暴涨（与 hm1l 对齐）：扫描时刻该小时卖量 / 昨日日均小时卖量；与 R24 涨幅榜 AND
+    enable_sell_surge_gate: bool = False
+    sell_surge_threshold: float = 10.0
+    sell_surge_max: float = 1e12
+
     # Supertrend
     enable_supertrend_gate: bool = False
     st_period: int = 6
@@ -48,6 +53,7 @@ class RollingConfig:
     # free_cash_pct | equity_pct | fixed_usd（见 MoonshotConfig 注释）
     position_sizing_mode: PositionSizingMode = "free_cash_pct"
     position_size_ratio: float = 0.08
+    # fixed_usd：每笔开仓保证金(USD)，不超过当时剩余现金；JSON 别名 fixed_margin_usd
     fixed_invest_usd: float | None = None
     max_positions: int = 8
     leverage: int = 3
@@ -74,7 +80,7 @@ class RollingConfig:
     ratio_data_start: str = '2025-12-12'
 
     # Add Position
-    enable_add_position: bool = True
+    enable_add_position: bool = False
     add_position_threshold: float = 0.2
     add_position_multiplier: float = 1.0
 
@@ -113,7 +119,8 @@ class RollingStrategy:
             detail = {
                 'symbol': symbol, 'pct_chg': pct_chg, 'listed_days': None,
                 'avg_price_30d': None, 'close_1d': None, 'from_avg_pct': None,
-                'profit_threshold': None, 'filter_result': '通过'
+                'profit_threshold': None, 'filter_result': '通过',
+                'sell_surge_ratio': None, 'yesterday_avg_hour_sell_volume': None,
             }
 
             if pct_chg < self.config.min_pct_chg:
@@ -148,6 +155,32 @@ class RollingStrategy:
                             detail['filter_result'] = '剔除:主力未获利'
                             self.last_signal_details.append(detail)
                             continue
+
+            # 有 RollingDataFeed 时始终查询并记录卖量倍数（便于 CSV；门控仍由 enable_sell_surge_gate 决定）
+            loader = getattr(feed, "load_sell_surge_detail", None)
+            if loader is not None:
+                sr, yavg = loader(symbol, dt)
+                detail["sell_surge_ratio"] = sr
+                detail["yesterday_avg_hour_sell_volume"] = yavg
+
+            if self.config.enable_sell_surge_gate:
+                if loader is None:
+                    detail['filter_result'] = '剔除:卖量门控需要RollingDataFeed'
+                    self.last_signal_details.append(detail)
+                    continue
+                sr = detail.get("sell_surge_ratio")
+                if sr is None:
+                    detail['filter_result'] = '剔除:卖量数据不足'
+                    self.last_signal_details.append(detail)
+                    continue
+                if sr < self.config.sell_surge_threshold:
+                    detail['filter_result'] = '剔除:卖量未暴涨'
+                    self.last_signal_details.append(detail)
+                    continue
+                if sr > self.config.sell_surge_max:
+                    detail['filter_result'] = '剔除:卖量倍数过高'
+                    self.last_signal_details.append(detail)
+                    continue
 
             self.last_signal_details.append(detail)
             results.append((symbol, pct_chg))
@@ -235,7 +268,7 @@ class RollingStrategy:
             return "add_position", entry_price * (1 + cfg.add_position_threshold)
 
         # Take profit
-        if (candle_low - entry_price) / entry_price <= -tp_threshold:
+        if candle_low <= entry_price * (1 - tp_threshold):
             res = (
                 "tp_after_add" if trade.has_added_position else
                 ("tp_reduced" if hold_hours >= cfg.tp_hours_threshold else "tp_initial")

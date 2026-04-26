@@ -6,16 +6,14 @@ import logging
 from datetime import UTC, datetime, timedelta
 
 from moonshot.client import BinanceFuturesClient
-from moonshot.paper.daily_scanner import DailyScanner
 from moonshot.paper.live_feed import LiveFeed
 from moonshot.paper.paper_account import PaperAccount
 from moonshot.paper.paper_store import PaperStore
 from moonshot.paper.position_monitor import PositionMonitor
-from moonshot.paper.rolling_scanner import RollingScanner
-from moonshot.paper.supertrend_monitor import SupertrendMonitor
+from moonshot.paper.rolling_scanner import RawSurgeScanner
 from moonshot.paper.ws_feed import PriceFeedWS
-from moonshot.rolling_strategy import RollingConfig, RollingStrategy
-from moonshot.strategy import MoonshotConfig, MoonshotStrategy
+from moonshot.r24_raw_surge_config import RawSurgeR24Config
+from moonshot.r24_raw_surge_strategy import RawSurgeRollingStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -34,55 +32,63 @@ def _next_rolling_scan_utc(now: datetime, interval_hours: int) -> datetime:
 
 
 class PaperRunner:
-    """Supports MoonshotConfig (daily) or RollingConfig (R24 hourly)."""
+    """Raw-surge only paper runner."""
 
     def __init__(
         self,
-        config: MoonshotConfig | RollingConfig,
+        config: RawSurgeR24Config,
         api_key: str = "",
         api_secret: str = "",
     ):
         self.config = config
         self.client = BinanceFuturesClient(api_key=api_key, secret_key=api_secret)
-        db_path = "paper_trading_rolling.db" if isinstance(config, RollingConfig) else "paper_trading.db"
-        self.store = PaperStore(db_path)
+        self.store = PaperStore("paper_trading.db")
         self.ws_feed = PriceFeedWS()
         self.feed = LiveFeed(self.client, ws_feed=self.ws_feed)
-        self.account = PaperAccount(self.store)
+        self.account = PaperAccount(self.store, config=config)
 
-        is_rolling = isinstance(config, RollingConfig)
-        if is_rolling:
-            self.scanner = RollingScanner(self.feed, self.store, self.account, config)
-            self._strategy = RollingStrategy(config)
-        else:
-            self.scanner = DailyScanner(self.feed, self.store, self.account, config)
-            self._strategy = MoonshotStrategy(config)
-
+        self.scanner = RawSurgeScanner(self.feed, self.store, self.account, config)
+        self._strategy = RawSurgeRollingStrategy(config)
         self.monitor = PositionMonitor(self.feed, self.store, self.account, self._strategy)
-        self.st_monitor = SupertrendMonitor(self.feed, self.store, self.scanner, config)
 
         self._running = False
-        self._tasks = []
+        self._tasks: list[asyncio.Task] = []
+        self._stop_lock = asyncio.Lock()
+        self._stopped = False
 
     async def start(self):
-        if self._running: return
+        if self._running:
+            return
+        self._stopped = False
         self._running = True
         logger.info("PaperRunner: Starting...")
         await self.client.__aenter__()
+        # 写入 DB，供 /logs 与「System Events」在首次整点扫描前也能看到服务在跑
+        self.store.log_event("RUN", "SYSTEM", "Paper raw-surge 服务已启动")
 
         self._tasks.append(asyncio.create_task(self.ws_feed.start(), name="PriceFeedWS"))
         self._tasks.append(asyncio.create_task(self._monitor_loop(), name="PositionMonitor"))
-        self._tasks.append(asyncio.create_task(self._scanner_loop(), name="DailyScanner"))
+        self._tasks.append(asyncio.create_task(self._scanner_loop(), name="RawSurgeScanner"))
         self._tasks.append(asyncio.create_task(self._equity_loop(), name="EquityLoop"))
-        if self.config.enable_supertrend_gate:
-            self._tasks.append(asyncio.create_task(self._supertrend_loop(), name="SupertrendMonitor"))
 
     async def stop(self):
-        logger.info("PaperRunner: Stopping...")
-        self._running = False
-        for task in self._tasks: task.cancel()
-        await asyncio.gather(*self._tasks, return_exceptions=True)
-        await self.client.__aexit__(None, None, None)
+        async with self._stop_lock:
+            if self._stopped:
+                return
+            self._stopped = True
+            logger.info("PaperRunner: Stopping...")
+            self._running = False
+            # 先断 WS，避免 async for 长时间不响应 cancel
+            try:
+                await self.ws_feed.stop()
+            except Exception as e:
+                logger.warning("PaperRunner: ws_feed.stop failed: %s", e)
+            for task in self._tasks:
+                task.cancel()
+            await asyncio.gather(*self._tasks, return_exceptions=True)
+            self._tasks.clear()
+            await self.client.__aexit__(None, None, None)
+            self.store.log_event("RUN", "SYSTEM", "Paper raw-surge 服务已停止")
 
     async def _monitor_loop(self):
         """Check positions every 3s (WS gives real-time prices)."""
@@ -95,47 +101,25 @@ class PaperRunner:
                 logger.error("MonitorLoop ERROR: %s", e)
                 await asyncio.sleep(10)
 
-    async def _supertrend_loop(self):
-        while self._running:
-            try:
-                await self.st_monitor.check_all()
-                await asyncio.sleep(60)
-            except asyncio.CancelledError: break
-            except Exception as e:
-                logger.error("SupertrendLoop ERROR: %s", e)
-                await asyncio.sleep(60)
-
     async def _scanner_loop(self):
-        is_rolling = isinstance(self.config, RollingConfig)
-        interval_hours = getattr(self.config, "scan_interval_hours", 1) if is_rolling else 24
-
-        # R24: initial scan 60s after start
-        if is_rolling:
-            ih = max(1, int(interval_hours))
-            logger.info("PaperRunner R24: scan_interval_hours=%s (UTC grid every %dh)", interval_hours, ih)
-            await asyncio.sleep(60)
-            if self._running:
-                await self.scanner.scan()
+        interval_hours = getattr(self.config, "scan_interval_hours", 1)
+        ih = max(1, int(interval_hours))
+        logger.info("PaperRunner raw-surge: scan_interval_hours=%s (UTC grid every %dh)", interval_hours, ih)
+        delay_min = int(getattr(self.config, "scan_delay_minutes", 1) or 0)
+        delay_min = max(0, delay_min)
 
         while self._running:
             try:
                 now = datetime.now(UTC)
-                if is_rolling:
-                    target = _next_rolling_scan_utc(now, interval_hours)
-                    wait_secs = max(60, (target - now).total_seconds())
-                    logger.info(
-                        "R24 ScannerLoop: next at %s UTC (in %.1fh, interval=%dh)",
-                        target.strftime("%Y-%m-%d %H:%M"),
-                        wait_secs / 3600,
-                        max(1, int(interval_hours)),
-                    )
-                else:
-                    # Daily: run at 00:05 UTC
-                    target = now.replace(hour=0, minute=5, second=0, microsecond=0)
-                    if now >= target:
-                        target += timedelta(days=1)
-                    wait_secs = (target - now).total_seconds()
-                    logger.info("ScannerLoop: Waiting %.1f hours until daily scan", wait_secs / 3600)
+                # 扫描对齐 UTC 整点网格，但延后 delay_min 分钟执行，避免小时边界数据未完整。
+                target = _next_rolling_scan_utc(now, interval_hours) + timedelta(minutes=delay_min)
+                wait_secs = max(1, (target - now).total_seconds())
+                logger.info(
+                    "RawSurge ScannerLoop: next at %s UTC (in %.1fh, interval=%dh)",
+                    target.strftime("%Y-%m-%d %H:%M"),
+                    wait_secs / 3600,
+                    max(1, int(interval_hours)),
+                )
 
                 await asyncio.sleep(wait_secs)
 
@@ -169,169 +153,5 @@ class PaperRunner:
                 await asyncio.sleep(300)
 
 
-class DualPaperRunner:
-    """Runs daily and rolling strategies in parallel, each with independent store/account."""
-
-    def __init__(
-        self,
-        daily_config: MoonshotConfig,
-        rolling_config: RollingConfig,
-        api_key: str = "",
-        api_secret: str = "",
-    ):
-        self.daily_config = daily_config
-        self.rolling_config = rolling_config
-        self.client = BinanceFuturesClient(api_key=api_key, secret_key=api_secret)
-        self.ws_feed = PriceFeedWS()
-        self.feed = LiveFeed(self.client, ws_feed=self.ws_feed)
-
-        # Daily lane
-        self.daily_store = PaperStore("paper_trading_daily.db")
-        self.daily_account = PaperAccount(self.daily_store, 10000.0)
-        self.daily_scanner = DailyScanner(self.feed, self.daily_store, self.daily_account, daily_config)
-        self.daily_monitor = PositionMonitor(
-            self.feed, self.daily_store, self.daily_account,
-            MoonshotStrategy(daily_config),
-        )
-        self.daily_st_monitor = SupertrendMonitor(
-            self.feed, self.daily_store, self.daily_scanner, daily_config,
-        )
-
-        # Rolling lane
-        self.rolling_store = PaperStore("paper_trading_rolling.db")
-        self.rolling_account = PaperAccount(self.rolling_store, 10000.0)
-        self.rolling_scanner = RollingScanner(
-            self.feed, self.rolling_store, self.rolling_account, rolling_config,
-        )
-        self.rolling_monitor = PositionMonitor(
-            self.feed, self.rolling_store, self.rolling_account,
-            RollingStrategy(rolling_config),
-        )
-
-        # Compatibility: expose first store/account for single-runner API paths
-        self.store = self.daily_store
-        self.account = self.daily_account
-        self.scanner = self.daily_scanner
-
-        self._running = False
-        self._tasks = []
-
-    async def start(self):
-        if self._running:
-            return
-        self._running = True
-        ri = max(1, int(self.rolling_config.scan_interval_hours))
-        logger.info(
-            "DualPaperRunner: Starting daily + rolling (R24 interval=%dh, UTC grid)",
-            ri,
-        )
-        await self.client.__aenter__()
-
-        self._tasks.append(asyncio.create_task(self.ws_feed.start(), name="PriceFeedWS"))
-        self._tasks.append(asyncio.create_task(self._dual_monitor_loop(), name="PositionMonitor"))
-        self._tasks.append(asyncio.create_task(self._daily_scanner_loop(), name="DailyScanner"))
-        self._tasks.append(asyncio.create_task(self._rolling_scanner_loop(), name="RollingScanner"))
-        self._tasks.append(asyncio.create_task(self._dual_equity_loop(), name="EquityLoop"))
-        if self.daily_config.enable_supertrend_gate:
-            self._tasks.append(asyncio.create_task(self._supertrend_loop(), name="SupertrendMonitor"))
-
-    async def stop(self):
-        logger.info("DualPaperRunner: Stopping...")
-        self._running = False
-        for task in self._tasks:
-            task.cancel()
-        await asyncio.gather(*self._tasks, return_exceptions=True)
-        await self.client.__aexit__(None, None, None)
-
-    async def _dual_monitor_loop(self):
-        while self._running:
-            try:
-                await self.daily_monitor.check_all()
-                await self.rolling_monitor.check_all()
-                await asyncio.sleep(3)
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error("MonitorLoop ERROR: %s", e)
-                await asyncio.sleep(10)
-
-    async def _supertrend_loop(self):
-        while self._running:
-            try:
-                await self.daily_st_monitor.check_all()
-                await asyncio.sleep(60)
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error("SupertrendLoop ERROR: %s", e)
-                await asyncio.sleep(60)
-
-    async def _daily_scanner_loop(self):
-        while self._running:
-            try:
-                now = datetime.now(UTC)
-                target = now.replace(hour=0, minute=5, second=0, microsecond=0)
-                if now >= target:
-                    target += timedelta(days=1)
-                wait_secs = (target - now).total_seconds()
-                logger.info("DailyScannerLoop: waiting %.1fh until scan", wait_secs / 3600)
-                await asyncio.sleep(wait_secs)
-                if not self._running:
-                    break
-                await self.daily_scanner.scan()
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error("DailyScannerLoop ERROR: %s", e)
-                await asyncio.sleep(60)
-
-    async def _rolling_scanner_loop(self):
-        interval_hours = getattr(self.rolling_config, "scan_interval_hours", 1)
-        await asyncio.sleep(60)
-        if self._running:
-            await self.rolling_scanner.scan()
-
-        while self._running:
-            try:
-                now = datetime.now(UTC)
-                target = _next_rolling_scan_utc(now, interval_hours)
-                wait_secs = max(60, (target - now).total_seconds())
-                logger.info(
-                    "RollingScannerLoop: next at %s UTC (in %.1fh, interval=%dh)",
-                    target.strftime("%Y-%m-%d %H:%M"),
-                    wait_secs / 3600,
-                    max(1, int(interval_hours)),
-                )
-                await asyncio.sleep(wait_secs)
-                if not self._running:
-                    break
-                await self.rolling_scanner.scan()
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error("RollingScannerLoop ERROR: %s", e)
-                await asyncio.sleep(60)
-
-    async def _dual_equity_loop(self):
-        while self._running:
-            try:
-                now = datetime.now(UTC)
-                for store, account in [
-                    (self.daily_store, self.daily_account),
-                    (self.rolling_store, self.rolling_account),
-                ]:
-                    cash = float(account.capital)
-                    positions = store.get_open_positions()
-                    pos_value = 0.0
-                    for p in positions:
-                        price = await self.feed.get_current_price(p.symbol)
-                        if price:
-                            pnl = p.invest_amount * (p.entry_price - price) / p.entry_price * p.leverage
-                            pos_value += (p.invest_amount + pnl)
-                    store.append_equity_snapshot(now.isoformat(), cash + pos_value, cash)
-                await asyncio.sleep(300)
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error("EquityLoop ERROR: %s", e)
-                await asyncio.sleep(300)
+#
+# NOTE: Dual/daily/rolling runners removed — paper is raw-surge only.
