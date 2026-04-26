@@ -65,21 +65,18 @@ Moonshot monitors Binance USDT-M futures for **daily top gainers** (≥10% surge
 - **Mobile responsive** — auto-adapting nav and layout
 - **LAN accessible** — access from any device on the same network
 
-### CLI (7 Commands)
+### CLI (paper = raw-surge R24)
 ```
-python -m moonshot.paper start                     # Daily strategy (00:05 UTC)
-python -m moonshot.paper start --strategy rolling  # R24 hourly 24h-rolling
-python -m moonshot.paper start --strategy both     # Run daily + rolling in parallel (对照)
-python -m moonshot.paper status                    # Default: paper_trading.db
-python -m moonshot.paper status --dual             # Daily + rolling DBs
-python -m moonshot.paper status --store daily      # paper_trading_daily.db only
-python -m moonshot.paper positions --dual          # Same --dual / --store for positions|trades|logs|summary
-python -m moonshot.paper positions       # Detailed open positions
-python -m moonshot.paper trades          # Recent trades with fee breakdown
-python -m moonshot.paper logs            # System events (--type SCAN/OPEN/CLOSE)
-python -m moonshot.paper summary         # Full performance report
-python -m moonshot.paper scan                      # Manual scan (--strategy daily|rolling|both)
-python -m moonshot.paper reset --confirm           # Clear all data
+python -m moonshot.paper start
+python -m moonshot.paper start --port 8100
+python -m moonshot.paper start --config config/r24_raw_surge_params.json
+python -m moonshot.paper status
+python -m moonshot.paper positions
+python -m moonshot.paper trades
+python -m moonshot.paper logs            # System events (--type SCAN/OPEN/CLOSE/ADD/RUN)
+python -m moonshot.paper summary
+python -m moonshot.paper scan            # Optional: --config same as start
+python -m moonshot.paper reset --confirm
 ```
 
 ## Project Structure
@@ -182,7 +179,7 @@ uv run python -m moonshot.paper start --port 8100  # http://SERVER_IP:8100
 
 ### 6. Deploy with PM2
 
-进程通过 `scripts/paper-pm2.sh` 启动，从 `ecosystem.config.cjs` 里的 `env` 读取 **`PAPER_PORT`**（默认 `8100`）和 **`PAPER_STRATEGY`**：`daily` | `rolling` | `both`。改策略或端口后执行 **`pm2 restart moonshot-paper --update-env`** 即可生效。
+`scripts/paper-pm2.sh` 调用 `python -m moonshot.paper start`。`ecosystem.config.cjs` 的 `env` 可设 **`PAPER_PORT`**；可选 **`PAPER_CONFIG`**（非空时等价于加 `--config`，指向 R24 raw-surge 参数 JSON）。未设 `PAPER_CONFIG` 时与本地 CLI 一致，由 **`MOONSHOT_R24_RAW_SURGE_PARAMS`** 或自动发现 `config/r24_raw_surge_params.json` 加载。改端口或配置路径后执行 **`pm2 restart moonshot-paper --update-env`**。
 
 ```bash
 bash deploy.sh   # installs deps, builds frontend, starts PM2

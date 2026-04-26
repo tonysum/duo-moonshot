@@ -1,12 +1,10 @@
-// PM2 Ecosystem — Moonshot Paper Trading（云服务器）
+// PM2 Ecosystem — Moonshot Paper（raw-surge 单进程，无 daily/rolling 切换）
 //
-// 密钥：项目根目录 .env 中 BINANCE_* 即可（paper 入口会 load_dotenv）；
-// 也可在下方 env 填写或 shell export，后两者会覆盖 .env 同名变量。
+// 密钥：项目根目录 .env 中 BINANCE_*；可选 MOONSHOT_R24_RAW_SURGE_PARAMS 指向参数 JSON
 //
-// 策略 / 端口：改下方 env 里的 PAPER_STRATEGY、PAPER_PORT，然后
-//   pm2 restart moonshot-paper --update-env
-//
-// PAPER_STRATEGY: daily | rolling | both
+// 端口：改 PAPER_PORT；显式参数文件：设 PAPER_CONFIG 为相对项目根的路径（会传给 `paper start --config`）。
+// 不设 PAPER_CONFIG 时与本地 `python -m moonshot.paper start` 相同（环境变量 + 自动发现 config/r24_raw_surge_params.json）
+// 改 env 后：pm2 restart moonshot-paper --update-env
 
 const path = require("path");
 
@@ -20,7 +18,8 @@ module.exports = {
       env: {
         PYTHONUNBUFFERED: "1",
         PAPER_PORT: "8100",
-        PAPER_STRATEGY: "both",
+        // 若固定使用仓库内文件，可取消下一行注释：
+        // PAPER_CONFIG: "config/r24_raw_surge_params.json",
       },
       // Auto-restart
       autorestart: true,
