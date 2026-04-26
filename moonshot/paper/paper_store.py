@@ -125,7 +125,10 @@ class PaperStore:
     def get_open_positions(self) -> list[MoonshotPosition]:
         with self._conn:
             cursor = self._conn.execute("SELECT data FROM positions")
-            return [MoonshotPosition.model_validate_json(row[0]) for row in cursor.fetchall()]
+            positions = [MoonshotPosition.model_validate_json(row[0]) for row in cursor.fetchall()]
+        # ISO-8601 字符串与时间点顺序一致；升序 = 先开仓的在前
+        positions.sort(key=lambda p: p.entry_time)
+        return positions
 
     def position_count(self) -> int:
         with self._conn:

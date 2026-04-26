@@ -8,9 +8,9 @@
     "scan_interval_hours": 1,
     "signal_cooldown_hours": 48,
     "top_n": 1,
-    "candidate_rank_mode": "pct_log_sr",
+    "candidate_rank_mode": "sr",
     "max_sr_probe": 90,
-    "min_pct_chg": 13,
+    "min_pct_chg": 10,
     "min_listed_days": 10,
 
     "tp_initial": 0.21,
