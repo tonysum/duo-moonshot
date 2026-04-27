@@ -1,27 +1,28 @@
 {
   "params": {
-    "raw_min_sell_surge": 10,
+    "raw_min_sell_surge": 30,
     "raw_max_sell_surge": 300,
+    "raw_min_yavg_sell_volume": 10000,
     "raw_max_signals_per_hour": null,
 
     "rolling_window_hours": 24,
     "scan_interval_hours": 1,
     "signal_cooldown_hours": 48,
-    "top_n": 1,
+    "top_n": 2,
     "candidate_rank_mode": "sr",
     "max_sr_probe": 90,
     "min_pct_chg": 10,
     "min_listed_days": 10,
 
-    "tp_initial": 0.21,
-    "sl_threshold": 0.33,
-    "tp_reduced": 0.11,
+    "tp_initial": 0.12,
+    "sl_threshold": 0.15,
+    "tp_reduced": 0.10,
     "tp_hours_threshold": 16,
 
-    "leverage": 3,
+    "leverage": 5,
     "max_positions": 7,
     "position_size_ratio": 0.05,
-    "max_hold_days": 6,
+    "max_hold_days": 7,
     "position_sizing_mode": "free_cash_pct",
     "fixed_invest_usd": null,
 

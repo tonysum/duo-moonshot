@@ -78,13 +78,15 @@ def _phase1_objective(
     fixed_invest_usd: float | None,
     phase1_rank_mode: str | None = None,
 ) -> float:
-    """``phase1_rank_mode``：``None`` 时在 sr / pct_log_sr 间搜索；``\"sr\"`` / ``\"pct_log_sr\"`` 时固定该模式。"""
+    """``phase1_rank_mode``：search 时在三档排序间搜；``sr`` / ``pct_log_sr`` / ``pct_log_sr_liq`` 时固定该模式。"""
     if phase1_rank_mode == "sr":
         rank_choices = ["sr"]
     elif phase1_rank_mode == "pct_log_sr":
         rank_choices = ["pct_log_sr"]
+    elif phase1_rank_mode == "pct_log_sr_liq":
+        rank_choices = ["pct_log_sr_liq"]
     else:
-        rank_choices = ["sr", "pct_log_sr"]
+        rank_choices = ["sr", "pct_log_sr", "pct_log_sr_liq"]
     cfg = RawSurgeR24Config(
         candidate_rank_mode=trial.suggest_categorical("candidate_rank_mode", rank_choices),
         max_sr_probe=trial.suggest_int("max_sr_probe", 20, 120, step=10),
@@ -497,9 +499,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--phase1-rank-mode",
-        choices=["search", "sr", "pct_log_sr"],
+        choices=["search", "sr", "pct_log_sr", "pct_log_sr_liq"],
         default="search",
-        help="Phase 1 only: search both rank modes (default), or fix candidate_rank_mode",
+        help="Phase 1: search sr|pct_log_sr|pct_log_sr_liq (default) or fix one mode",
     )
     parser.add_argument(
         "--storage",

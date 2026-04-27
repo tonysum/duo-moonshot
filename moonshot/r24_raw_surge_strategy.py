@@ -17,7 +17,7 @@ class RawSurgeRollingStrategy:
     """预加载字典的 value 可为 ``(symbol, pct)`` 或 ``(symbol, pct, sr, yavg)``。
 
     预加载阶段：漏斗见 ``r24_raw_surge_preload.build_raw_surge_hourly_gainers``（涨幅门 →
-    ``max_sr_probe`` → sr 门 → ``candidate_rank_mode`` 截 ``top_n``）。若配置了
+    ``max_sr_probe`` → sr 门 → 可选 ``raw_min_yavg_sell_volume`` → ``candidate_rank_mode`` 截 ``top_n``）。若配置了
     ``raw_max_signals_per_hour``，在 ``select_signals`` 内再截断到该上限。
     """
 

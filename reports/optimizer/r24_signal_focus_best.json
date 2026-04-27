@@ -1,14 +1,14 @@
 {
   "optimizer": "r24_signal_focus",
-  "score": 20791.204530353254,
+  "score": 1433.5984822675287,
   "params": {
-    "raw_min_sell_surge": 5.5,
-    "min_pct_chg": 5.0,
-    "top_n": 2,
-    "scan_interval_hours": 1,
+    "raw_min_sell_surge": 20.0,
+    "min_pct_chg": 10.0,
+    "top_n": 5,
+    "scan_interval_hours": 2,
     "signal_cooldown_hours": 48,
-    "max_hold_days": 1,
-    "candidate_rank_mode": "sr",
+    "max_hold_days": 7,
+    "candidate_rank_mode": "pct_log_sr",
     "position_sizing_mode": "free_cash_pct",
     "fixed_invest_usd": null
   }

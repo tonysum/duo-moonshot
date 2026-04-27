@@ -17,3 +17,6 @@ logs/
 visualize.html
 *.db
 bak/
+paper_trading.db
+paper_trading.db-shm
+paper_trading.db-wal

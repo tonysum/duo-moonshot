@@ -5,7 +5,7 @@
 1. ``scan_hourly_rolling_above_threshold`` → 涨幅合格集合
 2. 每小时按涨幅降序截 ``max_sr_probe``（探测集，防 DB/REST 风暴；``<=0`` 表示不截断）
 3. 对探测集算 ``sell_surge_ratio``，保留 **严格大于** ``min_sell_surge``
-4. 按 ``candidate_rank_mode``（``sr`` 或 ``pct_log_sr``）降序截 ``top_n``
+4. 按 ``candidate_rank_mode`` 降序截 ``top_n``（见 ``candidate_rank_score``）
 
 供 ``R24RawSurgeRunner`` 使用。
 """
@@ -26,11 +26,23 @@ from moonshot.sell_surge_signal import sell_surge_ratio_at_scan_hour
 logger = logging.getLogger(__name__)
 
 
-def _candidate_rank_score(pct_chg: float, sr: float, mode: str) -> float:
-    """卖量门之后的截断排序分数（越大越优先）。与 ``duo-live/live/rolling_scanner._candidate_rank_score`` 一致。"""
+def candidate_rank_score(
+    pct_chg: float,
+    sr: float,
+    mode: str,
+    yavg: float | None = None,
+) -> float:
+    """卖量门之后的截断排序分数（越大越优先）。Paper / 回测 / live 共用同一套口径。"""
     m = (mode or "sr").strip().lower()
+    y = 0.0
+    if yavg is not None and yavg == yavg:  # not NaN
+        y = max(float(yavg), 0.0)
     if m == "pct_log_sr":
         return float(pct_chg) * math.log(1.0 + max(float(sr), 0.0))
+    if m == "pct_log_sr_liq":
+        base = float(pct_chg) * math.log(1.0 + max(float(sr), 0.0))
+        liq = math.log(1.0 + y)
+        return base * max(liq, 0.2)
     if m != "sr":
         logger.warning("[R24-RS] unknown candidate_rank_mode %r — using sr", mode)
     return float(sr)
@@ -47,11 +59,23 @@ def _passes_sell_surge_gate(sr: float | None, *, min_sr: float, max_sr: float | 
     return True
 
 
+def _passes_yavg_gate(yavg: float | None, min_yavg: float | None) -> bool:
+    if min_yavg is None or min_yavg <= 0:
+        return True
+    if yavg is None:
+        return False
+    try:
+        return float(yavg) >= float(min_yavg)
+    except (TypeError, ValueError):
+        return False
+
+
 def _enrich_hits_sell_surge_batch(
     db_params: dict,
     batch: list[tuple[str, str, float]],
     min_sell_surge: float,
     max_sell_surge: float | None,
+    min_yavg: float | None = None,
 ) -> list[tuple[str, str, float, float, float]]:
     """One worker: filter ``batch`` by sell surge; cache K1d baseline per (symbol, day)."""
     if not batch:
@@ -72,6 +96,8 @@ def _enrich_hits_sell_surge_batch(
                 conn, symbol, dt, daily_sell_baseline_cache=baseline_cache
             )
             if not _passes_sell_surge_gate(sr, min_sr=min_sell_surge, max_sr=max_sell_surge):
+                continue
+            if not _passes_yavg_gate(yavg, min_yavg):
                 continue
             yv = float(yavg) if yavg is not None else 0.0
             out.append((hour_key, symbol, float(pct), float(sr), yv))
@@ -94,6 +120,7 @@ def build_raw_surge_hourly_gainers(
     top_n: int = 5,
     max_sr_probe: int = 50,
     candidate_rank_mode: str = "sr",
+    min_yavg_sell_volume: float | None = None,
 ) -> dict[str, list[tuple[str, float, float, float]]]:
     """Return ``{ 'YYYY-MM-DD HH:00': [(symbol, pct, sell_surge_ratio, yday_avg_hour_sell), ...] }``.
 
@@ -142,7 +169,14 @@ def build_raw_surge_hourly_gainers(
         merged_rows: list[tuple[str, str, float, float, float]] = []
         with ThreadPoolExecutor(max_workers=len(batches)) as ex:
             futs = {
-                ex.submit(_enrich_hits_sell_surge_batch, db_params, b, min_sell_surge, max_sell_surge): i
+                ex.submit(
+                    _enrich_hits_sell_surge_batch,
+                    db_params,
+                    b,
+                    min_sell_surge,
+                    max_sell_surge,
+                    min_yavg_sell_volume,
+                ): i
                 for i, b in enumerate(batches)
             }
             for fut in as_completed(futs):
@@ -158,7 +192,7 @@ def build_raw_surge_hourly_gainers(
     for k in list(by_hour.keys()):
         rows = by_hour[k]
         rows.sort(
-            key=lambda x: _candidate_rank_score(x[1], x[2], mode),
+            key=lambda x: candidate_rank_score(x[1], x[2], mode, x[3]),
             reverse=True,
         )
         if top_n > 0:

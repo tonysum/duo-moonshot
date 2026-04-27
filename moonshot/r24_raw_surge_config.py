@@ -2,6 +2,20 @@
 
 运行时参数请用 JSON 加载：``load_raw_surge_r24_config``（默认读取 ``config/r24_raw_surge_params.json``）。
 字段与原先继承 ``RollingConfig`` 时保持一致，便于现有 JSON 与优化结果继续可用。
+
+---
+简易方案（在不动整体漏斗的前提下先试）:
+
+1) **raw_min_yavg_sell_volume**（可选）\
+   昨日「日均小时卖额」下限，与 K 线里主动卖量同单位（一般 USDT 量级）。\
+   从 `null` 开始；若小币、假信号多，可逐步提高（例如 5e3、2e4…），以回测曲线为准。
+
+2) **candidate_rank_mode** = `pct_log_sr_liq` \
+   在 `pct * log(1+sr)` 上再乘 `log(1+昨日小时均卖额)`，略倾向流动性更好的标的。\
+   若更相信卖量倍数本身，用 `sr`；折中用 `pct_log_sr`。
+
+3) 仍不理想时，再调 **raw_min_sell_surge** / **raw_max_sell_surge** / **top_n**，一次只改一项便于归因。
+---
 """
 
 from __future__ import annotations
@@ -67,8 +81,12 @@ class RawSurgeR24Config:
     raw_max_signals_per_hour: int | None = None
     # 与 duo-live ``rolling_scanner`` / ``docs/signal-scan-order.md`` 对齐：
     # 涨幅合格 → 按涨幅截 max_sr_probe → 算 sr → sr 门 → 按 candidate_rank_mode 截 top_n。
-    candidate_rank_mode: str = "pct_log_sr"  # "sr" | "pct_log_sr"
+    # sr | pct_log_sr | pct_log_sr_liq（最后一项在 pct_log_sr 上再乘 log(1+昨均小时卖额)）
+    candidate_rank_mode: str = "pct_log_sr"
     max_sr_probe: int = 50
+
+    # 昨日「小时均卖额」下限（K 线 volume 同单位，多为 USDT）。None 或 0=不限制；用于压小分母噪点。
+    raw_min_yavg_sell_volume: float | None = None
 
     # ── Paper realism knobs (optional) ───────────────────────────────
     # Slippage in basis points (bps). Short entry/add: worse fill = lower price; exit: worse fill = higher price.

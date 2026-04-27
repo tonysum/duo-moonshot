@@ -5,19 +5,19 @@
 - 候选：24hr ticker 涨幅 >= ``min_pct_chg``（全市场最多 500 名，见 ``scan_rolling_top_gainers``）
 - 探测：按涨幅降序截 ``max_sr_probe`` 后再算卖量比（防 REST 风暴；与 live 一致）
 - 卖量：上一整点已收盘 1h K 相对昨日日均小时主动卖额；``raw_max`` / ``raw_min_sell_surge`` 门
-- 截断：``candidate_rank_mode``（``sr`` / ``pct_log_sr``）排序后取 ``top_n``，再 ``select_signals``
+- 截断：``candidate_rank_mode`` 排序后取 ``top_n``，再 ``select_signals``（与 preload 同 ``candidate_rank_score``）
 - 策略：``should_enter`` 用当前整点 UTC 作 ``dt``；与历史回测 hourly 桶标签可差 1h，属实盘优先。
 """
 
 import json
 import logging
-import math
 from datetime import UTC, datetime, timedelta
 
 from moonshot.paper.live_feed import LiveFeed
 from moonshot.paper.paper_account import PaperAccount
 from moonshot.paper.paper_store import MoonshotPosition, PaperStore
 from moonshot.r24_raw_surge_config import RawSurgeR24Config
+from moonshot.r24_raw_surge_preload import candidate_rank_score
 from moonshot.r24_raw_surge_strategy import RawSurgeRollingStrategy
 
 logger = logging.getLogger(__name__)
@@ -25,15 +25,6 @@ logger = logging.getLogger(__name__)
 # 与 duo-live ``live/rolling_scanner.ROLLING_24H_GAINERS_CAP`` 一致
 _ROLLING_24H_GAINERS_CAP = 500
 
-
-def _candidate_rank_score(pct_chg: float, sr: float, mode: str) -> float:
-    """卖量门之后截断排序；与 live / ``r24_raw_surge_preload`` 同口径。"""
-    m = (mode or "sr").strip().lower()
-    if m == "pct_log_sr":
-        return float(pct_chg) * math.log(1.0 + max(float(sr), 0.0))
-    if m != "sr":
-        logger.warning("unknown candidate_rank_mode %r — using sr", mode)
-    return float(sr)
 
 class _RawSurgeFeedAdapter:
     """给 RawSurgeRollingStrategy 用的同步适配层（面向多 symbol）。"""
@@ -183,10 +174,22 @@ class RawSurgeScanner:
                 all_records[symbol]["filter_result"] = "卖量不足"
                 continue
 
+            min_yavg = getattr(self._config, "raw_min_yavg_sell_volume", None)
+            if min_yavg is not None and float(min_yavg) > 0:
+                yv = float(yavg) if yavg is not None else -1.0
+                if yavg is None or yv < float(min_yavg):
+                    self._store.log_event(
+                        "SCAN", symbol,
+                        f"❌ {symbol} +{pct_chg:.1f}% 昨均卖额{yavg if yavg is not None else '—'} < {min_yavg}",
+                    )
+                    skipped.append((symbol, f"+{pct_chg:.1f}% 昨均卖额过低"))
+                    all_records[symbol]["filter_result"] = "昨均卖额过低"
+                    continue
+
             sr_passed.append((symbol, float(pct_chg), float(sr), yavg))
 
         sr_passed.sort(
-            key=lambda x: _candidate_rank_score(x[1], x[2], rank_mode),
+            key=lambda x: candidate_rank_score(x[1], x[2], rank_mode, x[3] if x[3] is not None else None),
             reverse=True,
         )
         topn = int(self._config.top_n) if (self._config.top_n or 0) > 0 else 0
@@ -211,12 +214,22 @@ class RawSurgeScanner:
                 all_records[sym].update({k: v for k, v in detail.items() if k not in ("symbol",)})
 
         # 与 live 一致：以 candidate_rank_mode 为优先序（在 select 之后仍按同一分数，便于同分 tie-break）
+        def _yavg_for_rank(d: dict) -> float | None:
+            y = d.get("yesterday_avg_hour_sell_volume")
+            if y is None:
+                return None
+            try:
+                return float(y)
+            except (TypeError, ValueError):
+                return None
+
         signal_details = sorted(
             getattr(self._strategy, "last_signal_details", []),
-            key=lambda d: _candidate_rank_score(
+            key=lambda d: candidate_rank_score(
                 float(d.get("pct_chg") or 0.0),
                 float(d.get("sell_surge_ratio") or 0.0),
                 rank_mode,
+                _yavg_for_rank(d),
             ),
             reverse=True,
         )

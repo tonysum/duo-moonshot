@@ -259,6 +259,7 @@ class R24RawSurgeRunner:
             top_n=cfg.top_n,
             max_sr_probe=cfg.max_sr_probe,
             candidate_rank_mode=cfg.candidate_rank_mode,
+            min_yavg_sell_volume=cfg.raw_min_yavg_sell_volume,
         )
 
         current_dt = start
