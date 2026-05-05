@@ -74,13 +74,10 @@ class MoonshotRunner:
                 if not candles_5m:
                     still_open.append(trade); continue
 
-                ratio = self._feed.load_top_trader_ratio(symbol, current_dt) if cfg.enable_dynamic_ratio_sl else None
                 exit_found = False
                 for c5 in candles_5m:
                     hold_h = (c5.open_time - entry_dt).total_seconds() / 3600
                     res = self._strategy.check_exit(trade, c5.high, c5.low, c5.close, c5.open_time, hold_h)
-                    if not res and cfg.enable_dynamic_ratio_sl:
-                        res = self._strategy.check_dynamic_ratio_sl(trade, ratio, c5.open_time, c5.close)
 
                     if res:
                         res_str, exit_p = res
@@ -117,9 +114,7 @@ class MoonshotRunner:
                         self._account.close_position_bt8(trade, res_str, exit_p, c5.open_time, int(hold_h))
                         if self.verbose:
                             icon = "✅" if is_win_result(res_str) else (
-                                "🎯" if res_str == "dynamic_ratio_sl" else (
-                                    "⏰" if "timeout" in res_str else "❌"
-                                )
+                                "⏰" if "timeout" in res_str else "❌"
                             )
                             logger.info(
                                 "  %s %s %s→%s %.1fh pnl=%.0f",
@@ -196,7 +191,6 @@ class MoonshotRunner:
                     total_equity = cap + sum(t.invest_amount for t in open_trades)
                     invest = self._strategy.compute_order_margin(cap, total_equity)
                     if 0 < invest <= cap:
-                        entry_ratio = self._feed.load_top_trader_ratio(symbol, entry_t) if cfg.enable_dynamic_ratio_sl else None
                         trade = AmplitudeTrade(
                             entry_time=item['signal_time'], entry_price=entry_p, base_price=entry_p,
                             direction="short", level=symbol, target_pct=cfg.tp_initial*100,
@@ -204,7 +198,6 @@ class MoonshotRunner:
                             stop_loss_pct=cfg.sl_threshold*100, stop_loss_price=entry_p*(1+cfg.sl_threshold),
                             status="filled", filled_time=entry_t, surge_pct=item['pct_chg'],
                             signal_price=item['signal_price'], entry_reason=item['reason'],
-                            entry_account_ratio=entry_ratio,
                             tp_initial_price=entry_p*(1-cfg.tp_initial),
                         )
                         self._account.open_position_bt8(trade, invest, cfg.leverage)
@@ -218,7 +211,7 @@ class MoonshotRunner:
                             all_signals_history[idx]['trade_ref'] = trade
 
                         if self.verbose:
-                            logger.info("  🎯 MOONSHOT %s @ %.4f ratio=%.2f invest=%.0f", symbol, entry_p, entry_ratio or 0, invest)
+                            logger.info("  🎯 MOONSHOT %s @ %.4f invest=%.0f", symbol, entry_p, invest)
                 else:
                     still_pending.append(item)
             pending_entries = still_pending

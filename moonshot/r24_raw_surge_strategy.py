@@ -214,16 +214,6 @@ class RawSurgeRollingStrategy:
 
         return None
 
-    def check_dynamic_ratio_sl(
-        self,
-        trade: AmplitudeTrade,
-        current_ratio: float | None,
-        current_time: datetime,
-        current_price: float,
-    ) -> tuple[str, float] | None:
-        """R24-raw-surge 不使用多空比动态止损。"""
-        return None
-
     def compute_order_margin(self, free_cash: float, total_equity: float) -> float:
         c = self.config
         return _compute_order_margin(

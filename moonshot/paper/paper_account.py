@@ -56,12 +56,17 @@ class PaperAccount:
             return p / f
         return p * f
 
-    def open_position(self, pos: MoonshotPosition):
+    def open_position(self, pos: MoonshotPosition) -> bool:
+        """Return True if opened; False if insufficient capital (logged, no exception)."""
         notional = float(pos.invest_amount) * float(pos.leverage)
         entry_commission = notional * self._fee_rate()
         need = float(pos.invest_amount) + entry_commission
         if self.capital < need:
-            raise ValueError(f"Insufficient capital: {self.capital} < {need}")
+            logger.warning(
+                "Paper skip open %s: insufficient capital %.4f < need %.4f",
+                pos.symbol, self.capital, need,
+            )
+            return False
         if not self.store.get_state("initial_capital"):
             # Summary 收益率基准：首笔开仓前权益 = 可用现金 + 本笔将锁定的保证金
             self.store.set_state("initial_capital", str(self.capital + need))
@@ -76,6 +81,7 @@ class PaperAccount:
             pos.symbol,
             f"Opened {pos.symbol} @ {pos.entry_price}, invest={pos.invest_amount}, comm={entry_commission:.2f}",
         )
+        return True
 
     async def close_position(
         self,
@@ -98,10 +104,11 @@ class PaperAccount:
         exit_comm = float(notional) * self._fee_rate()
         commission = entry_comm + exit_comm
 
-        # Funding fee: fetch real rates from exchange
+        # Funding fee: fetch real rates from exchange (optional; align with backtest enable_funding_fee)
         funding_fee = 0.0
         funding_count = 0
-        if feed:
+        fund_on = self._config is None or getattr(self._config, "enable_funding_fee", True)
+        if feed and fund_on:
             try:
                 entry_dt = datetime.fromisoformat(pos.entry_time)
                 exit_dt = datetime.fromisoformat(exit_time)
@@ -174,9 +181,8 @@ class PaperAccount:
         if add_size <= 0:
             return
         add_margin = add_size * float(fill_add)
-        add_notional = add_margin * float(pos.leverage)
-        add_comm = add_notional * self._fee_rate()
-        need = add_margin + add_comm
+        # 与回测 account.add_position_bt8 一致：补仓扣保证金，不单独收一笔「加仓佣金」。
+        need = add_margin
         if self.capital < need:
             logger.warning("Insufficient capital for add_position on %s", symbol)
             return
@@ -201,5 +207,5 @@ class PaperAccount:
         self.store.log_event(
             "ADD",
             symbol,
-            f"Added to {symbol} @ {fill_add} (raw={add_price}), new avg={pos.entry_price:.4f}, comm={add_comm:.2f}",
+            f"Added to {symbol} @ {fill_add} (raw={add_price}), new avg={pos.entry_price:.4f}",
         )

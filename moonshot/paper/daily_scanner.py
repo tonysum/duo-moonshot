@@ -36,8 +36,7 @@ class LiveFeedAdapter:
             o = await self.feed.load_1d_open(self.symbol, dt)
             c = await self.feed.load_1d_close(self.symbol, dt)
             v = await self.feed.load_24h_volume(self.symbol, dt)
-            r = await self.feed.load_top_trader_ratio(self.symbol, dt)
-            self._daily_data[dstr] = {"open": o or 0.0, "close": c or 0.0, "volume": v, "ratio": r or 0.0}
+            self._daily_data[dstr] = {"open": o or 0.0, "close": c or 0.0, "volume": v}
 
     def _get_day(self, dt: datetime) -> dict:
         return self._daily_data.get(dt.strftime("%Y-%m-%d"), {})
@@ -56,9 +55,6 @@ class LiveFeedAdapter:
 
     def load_24h_volume(self, symbol: str, dt: datetime, *args) -> float:
         return self._get_day(dt).get("volume", -1.0)
-
-    def load_top_trader_ratio(self, symbol: str, dt: datetime, *args) -> float:
-        return self._get_day(dt).get("ratio", 0.0)
 
 class DailyScanner:
     def __init__(self, feed: LiveFeed, store: PaperStore, account: PaperAccount, config: MoonshotConfig):
@@ -225,16 +221,18 @@ class DailyScanner:
             return
         tp_price = current_price * (1 - self._config.tp_initial)
         sl_price = current_price * (1 + self._config.sl_threshold)
-        entry_ratio = await self._feed.load_top_trader_ratio(symbol)
 
         pos = MoonshotPosition(
             symbol=symbol, entry_price=current_price, entry_time=datetime.now(UTC).isoformat(),
             invest_amount=float(invest), position_size=float(invest / current_price),
             leverage=self._config.leverage, surge_pct=surge_pct, entry_reason=reason,
             tp_price=tp_price, sl_price=sl_price, target_pct=self._config.tp_initial * 100,
-            stop_loss_pct=self._config.sl_threshold * 100, capital_before=free, entry_account_ratio=entry_ratio,
+            stop_loss_pct=self._config.sl_threshold * 100, capital_before=free,
             highest_price=current_price,
             tp_initial_price=tp_price,
             signal_price=current_price,
         )
-        self._account.open_position(pos)
+        if not self._account.open_position(pos):
+            self._store.log_event(
+                "OPEN_FAIL", symbol, f"Insufficient capital — skip {symbol}",
+            )

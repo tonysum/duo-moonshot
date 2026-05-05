@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 
 from moonshot.data_feed import DataFeed
 from moonshot.models import AmplitudeTrade
@@ -66,11 +66,6 @@ class MoonshotConfig:
     enable_trailing_take_profit: bool = True
     trailing_activation_pct: float = 0.16     # 浮盈≥该比例(相对入场价)后激活
     trailing_distance_pct: float = 0.09       # 自持仓以来最低价向上反弹该比例则平仓
-
-    # Dynamic Stop Loss
-    enable_dynamic_ratio_sl: bool = False
-    ratio_change_threshold: float = -0.18     # 多空比下降 ≥ 18% → 止损
-    ratio_data_start: str = '2025-12-12'
 
     # Add Position
     enable_add_position: bool = True   # 是否启用补仓
@@ -211,18 +206,6 @@ class MoonshotStrategy:
                     return "trailing_take_profit", ts_price
         if trade.lowest_price is None or candle_low < trade.lowest_price:
             trade.lowest_price = candle_low
-        return None
-
-    def check_dynamic_ratio_sl(self, trade: AmplitudeTrade, current_ratio: float | None, current_time: datetime, current_price: float) -> tuple[str, float] | None:
-        cfg = self.config
-        if not cfg.enable_dynamic_ratio_sl: 
-            return None
-        data_start = datetime.strptime(cfg.ratio_data_start, '%Y-%m-%d').replace(tzinfo=UTC)
-        if current_time < data_start or trade.entry_account_ratio is None or current_ratio is None: 
-            return None
-        if current_ratio - trade.entry_account_ratio <= cfg.ratio_change_threshold:
-            trade.exit_account_ratio, trade.account_ratio_change = current_ratio, current_ratio - trade.entry_account_ratio
-            return "dynamic_ratio_sl", current_price
         return None
 
     def compute_order_margin(self, free_cash: float, total_equity: float) -> float:

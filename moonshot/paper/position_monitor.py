@@ -85,10 +85,6 @@ class PositionMonitor:
             current_price=current_price, current_time=now_dt, hold_hours=hold_hours
         )
 
-        if result is None and self._config.enable_dynamic_ratio_sl:
-            current_ratio = await self._feed.load_top_trader_ratio(symbol)
-            result = self._strategy.check_dynamic_ratio_sl(pos, current_ratio, now_dt, current_price)
-
         if result is None:
             self._store.save_position(pos)
             return

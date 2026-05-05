@@ -35,6 +35,10 @@ class RawSurgeR24Config:
     min_listed_days: int = 10
     signal_cooldown_hours: int = 8
     rolling_window_hours: int = 24
+    #: ``rolling_window_hours!=24`` 时：24h ticker 预筛为 ``pct >= min_pct_chg * ratio``；``0`` 表示不做该下限（仅依赖 ``rolling_kline_prefilter_union_top``）。
+    rolling_kline_prefilter_pct_ratio: float = 0.6
+    #: 与预筛取并集：按 24h 涨跌幅排序前 N 个标的**必定**拉 1h K 验滚动涨幅，减轻「N 小时很强、24h 偏弱」被漏掉的问题。
+    rolling_kline_prefilter_union_top: int = 500
     scan_interval_hours: int = 2
     # 定时扫描在整点后延迟（分钟），避免“刚到 00:00”上一小时 K 线/成交量未落盘。
     scan_delay_minutes: int = 1
@@ -100,8 +104,3 @@ class RawSurgeR24Config:
 
     # Maintenance margin approximation: trigger liquidation when (margin + unrealized_pnl) <= margin * maintenance_margin_rate
     maintenance_margin_rate: float = 0.0
-
-    # Dynamic ratio stop loss
-    enable_dynamic_ratio_sl: bool = False
-    ratio_change_threshold: float = -0.18
-    ratio_data_start: str = "2025-12-12"

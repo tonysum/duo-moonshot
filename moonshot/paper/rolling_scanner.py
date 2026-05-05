@@ -60,22 +60,16 @@ class RawSurgeScanner:
 
     def _symbol_in_cooldown(self, symbol: str, now: datetime) -> bool:
         """True if we closed this symbol recently (within signal_cooldown_hours)."""
-        trades = self._store.get_trades(limit=200)
-        for t in trades:
-            if t.get("symbol") != symbol:
-                continue
-            exit_str = t.get("exit_time")
-            if not exit_str:
-                continue
-            try:
-                exit_dt = datetime.fromisoformat(exit_str.replace("Z", "+00:00"))
-                if exit_dt.tzinfo is None:
-                    exit_dt = exit_dt.replace(tzinfo=UTC)
-                if (now - exit_dt).total_seconds() < self._config.signal_cooldown_hours * 3600:
-                    return True
-            except Exception:
-                pass
-        return False
+        exit_str = self._store.get_latest_exit_time_iso(symbol)
+        if not exit_str:
+            return False
+        try:
+            exit_dt = datetime.fromisoformat(exit_str.replace("Z", "+00:00"))
+            if exit_dt.tzinfo is None:
+                exit_dt = exit_dt.replace(tzinfo=UTC)
+            return (now - exit_dt).total_seconds() < self._config.signal_cooldown_hours * 3600
+        except Exception:
+            return False
 
     async def scan(self):
         now = datetime.now(UTC)
@@ -85,6 +79,12 @@ class RawSurgeScanner:
             min_pct_chg=self._config.min_pct_chg,
             top_n=500,  # fetch all pct-qualifying symbols; top_n cap applied after sell surge filter
             window_hours=self._config.rolling_window_hours,
+            kline_prefilter_pct_ratio=getattr(
+                self._config, "rolling_kline_prefilter_pct_ratio", 0.6,
+            ),
+            kline_prefilter_union_top=getattr(
+                self._config, "rolling_kline_prefilter_union_top", 500,
+            ),
         )
 
         if not gainers:
@@ -100,6 +100,7 @@ class RawSurgeScanner:
         self._store.log_event("SCAN", "SYSTEM", f"Found {len(gainers)} raw candidate(s): {gainer_str}")
 
         open_positions = [p.symbol for p in self._store.get_open_positions()]
+        initial_open_syms = set(open_positions)
         skipped = []
         accepted = []
 
@@ -241,8 +242,19 @@ class RawSurgeScanner:
             sr = detail.get('sell_surge_ratio')
 
             if symbol in active_symbols:
+                kind = "已持仓" if symbol in initial_open_syms else "本轮已受理"
+                msg = f"{_fmt(pct_chg, sr)} — {kind}"
+                self._store.log_event("SCAN", symbol, f"❌ {symbol} {msg}")
+                skipped.append((symbol, msg))
+                if symbol in all_records:
+                    all_records[symbol]["filter_result"] = kind
                 continue
             if self._symbol_in_cooldown(symbol, now):
+                msg = f"{_fmt(pct_chg, sr)} — 冷却期"
+                self._store.log_event("SCAN", symbol, f"❌ {symbol} {msg}")
+                skipped.append((symbol, msg))
+                if symbol in all_records:
+                    all_records[symbol]["filter_result"] = "冷却期"
                 continue
             if detail.get('filter_result') != '通过':
                 self._store.log_event(
@@ -330,7 +342,6 @@ class RawSurgeScanner:
         fill_price = current_price * (1 - slip_bps / 10_000.0)
         tp_price = fill_price * (1 - self._config.tp_initial)
         sl_price = fill_price * (1 + self._config.sl_threshold)
-        entry_ratio = await self._feed.load_top_trader_ratio(symbol)
 
         pos = MoonshotPosition(
             symbol=symbol,
@@ -346,11 +357,15 @@ class RawSurgeScanner:
             target_pct=self._config.tp_initial * 100,
             stop_loss_pct=self._config.sl_threshold * 100,
             capital_before=free,
-            entry_account_ratio=entry_ratio,
             highest_price=float(fill_price),
             tp_initial_price=tp_price,
             signal_price=current_price,
             sell_surge_ratio=sell_surge_ratio,
             yesterday_avg_hour_sell_volume=yesterday_avg_hour_sell_quote,
         )
-        self._account.open_position(pos)
+        if not self._account.open_position(pos):
+            self._store.log_event(
+                "SCAN",
+                symbol,
+                f"❌ {symbol} +{surge_pct:.1f}% — 资金不足，未开仓",
+            )

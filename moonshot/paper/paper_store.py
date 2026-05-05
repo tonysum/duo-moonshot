@@ -144,6 +144,21 @@ class PaperStore:
             cursor = self._conn.execute("SELECT data FROM trades ORDER BY id DESC LIMIT ?", (limit,))
             return [json.loads(row[0]) for row in cursor.fetchall()]
 
+    def get_latest_exit_time_iso(self, symbol: str) -> str | None:
+        """该 symbol 最近一笔平仓的 exit_time（全表按 id 最新），不依赖全局 limit 截断。"""
+        with self._conn:
+            row = self._conn.execute(
+                """
+                SELECT exit_time FROM trades
+                WHERE symbol = ? AND exit_time IS NOT NULL AND exit_time != ''
+                ORDER BY id DESC LIMIT 1
+                """,
+                (symbol,),
+            ).fetchone()
+        if not row or not row[0]:
+            return None
+        return str(row[0]).strip() or None
+
     def get_trade_count(self) -> int:
         with self._conn:
             return self._conn.execute("SELECT COUNT(*) FROM trades").fetchone()[0]

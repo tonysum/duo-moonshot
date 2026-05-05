@@ -38,9 +38,6 @@
     "enable_trailing_take_profit": true,
     "trailing_activation_pct": 0.16,
     "trailing_distance_pct": 0.09,
-    "enable_dynamic_ratio_sl": false,
-    "ratio_change_threshold": -0.18,
-    "ratio_data_start": "2025-12-12",
     "enable_add_position": true,
     "add_position_threshold": 0.36,
     "add_position_multiplier": 1.0

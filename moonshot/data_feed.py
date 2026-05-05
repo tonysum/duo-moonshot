@@ -37,7 +37,6 @@ class DataFeed:
         self._cache_4h = {}
         self._cache_15m = {}
         self._cache_5m = {}
-        self._cache_top_ratio = {}
         self._cache_listing_date = {}
         self._daily_gainers_cache: dict = {}
 
@@ -254,19 +253,6 @@ class DataFeed:
                 cur.execute(sql.SQL("SELECT close FROM {} WHERE open_time >= %s AND open_time < %s LIMIT 1").format(sql.Identifier(f"K1d{sym}")), [day_ms, day_ms + 86400000])
                 row = cur.fetchone()
             return float(row[0]) if row and row[0] is not None else None
-        except Exception: return None
-
-    def load_top_trader_ratio(self, symbol: str, dt: datetime) -> float | None:
-        key = (symbol, dt)
-        if key in self._cache_top_ratio: return self._cache_top_ratio[key]
-        t_ms = int(dt.timestamp() * 1000)
-        try:
-            with self._db.conn.cursor() as cur:
-                cur.execute("SELECT long_short_ratio FROM top_account_ratio WHERE symbol = %s AND timestamp >= %s AND timestamp <= %s ORDER BY ABS(timestamp - %s) ASC LIMIT 1", [symbol, t_ms - 86400000, t_ms + 86400000, t_ms])
-                row = cur.fetchone()
-            res = float(row[0]) if row and row[0] is not None else None
-            self._cache_top_ratio[key] = res
-            return res
         except Exception: return None
 
     def load_supertrend(self, symbol: str, dt: datetime, period: int = 10, multiplier: float = 3.0, timeframe: str = "1h") -> str:

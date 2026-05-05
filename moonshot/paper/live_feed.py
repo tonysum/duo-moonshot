@@ -102,6 +102,9 @@ class LiveFeed:
         min_pct_chg: float = 10.0,
         top_n: int = 3,
         window_hours: int = 24,
+        *,
+        kline_prefilter_pct_ratio: float = 0.6,
+        kline_prefilter_union_top: int = 500,
     ) -> list[tuple[str, float]]:
         """Scan for top N rolling gainers.
 
@@ -130,14 +133,24 @@ class LiveFeed:
             for t in tickers
             if t.get("symbol", "") in tradeable
         }
-        # Take all symbols whose 24hr pct meets the proxy threshold (lower than exact threshold
-        # to avoid missing symbols whose rolling pct differs from 24hr pct)
-        pre_candidates = sorted(
-            [(s, p) for s, p in ticker_pct.items() if p >= min_pct_chg * 0.6],
-            key=lambda x: x[1],
-            reverse=True,
-        )
-        symbols_to_check = [s for s, _ in pre_candidates]
+        sorted_pairs = sorted(ticker_pct.items(), key=lambda x: x[1], reverse=True)
+        union_n = max(0, int(kline_prefilter_union_top))
+        to_check: set[str] = set()
+        for sym, _ in sorted_pairs[:union_n]:
+            to_check.add(sym)
+        if kline_prefilter_pct_ratio > 0:
+            floor = min_pct_chg * float(kline_prefilter_pct_ratio)
+            for s, p in ticker_pct.items():
+                if p >= floor:
+                    to_check.add(s)
+        else:
+            # ratio==0: only union-top set (caller controls coverage via union_top)
+            pass
+        if not to_check and sorted_pairs:
+            cap_fb = max(union_n, 500) if union_n else 500
+            for sym, _ in sorted_pairs[: min(cap_fb, len(sorted_pairs))]:
+                to_check.add(sym)
+        symbols_to_check = list(to_check)
 
         semaphore = asyncio.Semaphore(20)
         results: list[tuple[str, float]] = []
@@ -233,13 +246,6 @@ class LiveFeed:
             return sum(float(k.quote_asset_volume) for k in klines)
         except Exception:
             return -1.0
-
-    async def load_top_trader_ratio(self, symbol: str, dt: datetime | None = None) -> float | None:
-        try:
-            ratios = await self._client.get_top_long_short_account_ratio(symbol=symbol, period="1h", limit=1)
-            return float(ratios[0].long_short_ratio) if ratios else None
-        except Exception:
-            return None
 
     async def load_1h_candle(self, symbol: str) -> Candle | None:
         try:
