@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatUsdPrice } from '../formatUsdPrice';
 
 interface PositionProps {
   symbol: string;
@@ -24,10 +25,6 @@ interface PositionProps {
   /** 入场时昨日 UTC 日均每小时主动卖额（quote），与回测 CSV 一致 */
   yesterday_avg_hour_sell_volume?: number | null;
   strategy?: string;
-}
-
-function fmtPrice(v: number): string {
-  return v > 100 ? v.toFixed(2) : v.toFixed(5);
 }
 
 function fmtEntryTime(iso: string): string {
@@ -116,25 +113,25 @@ export const PositionCard: React.FC<PositionProps> = (pos) => {
       <div className="grid grid-cols-2 gap-3 font-mono text-sm">
         <div>
           <p className="text-[10px] uppercase font-bold text-muted-foreground">Entry</p>
-          <p className="font-black">${fmtPrice(pos.entry_price)}</p>
+          <p className="font-black">${formatUsdPrice(pos.entry_price)}</p>
         </div>
         <div>
           <p className="text-[10px] uppercase font-bold text-muted-foreground">Current</p>
-          <p className="font-black">${fmtPrice(pos.current_price)}</p>
+          <p className="font-black">${formatUsdPrice(pos.current_price)}</p>
         </div>
         <div className="col-span-2">
           <div className="flex gap-4">
             <div className="flex-1">
               <p className="text-[10px] uppercase font-bold text-muted-foreground">TP Price</p>
               <p className="font-black text-sm text-emerald-600">
-                ${fmtPrice(pos.tp_price)}
+                ${formatUsdPrice(pos.tp_price)}
                 <span className="text-xs ml-1 text-emerald-500">({pos.target_pct != null ? pos.target_pct : '—'}%)</span>
               </p>
             </div>
             <div className="flex-1">
               <p className="text-[10px] uppercase font-bold text-muted-foreground">SL Price</p>
               <p className="font-black text-sm text-red-600">
-                ${fmtPrice(pos.sl_price)}
+                ${formatUsdPrice(pos.sl_price)}
                 <span className="text-xs ml-1 text-red-500">({pos.stop_loss_pct != null ? pos.stop_loss_pct : '—'}%)</span>
               </p>
             </div>
@@ -167,7 +164,7 @@ export const PositionCard: React.FC<PositionProps> = (pos) => {
           )}
           {pos.has_added_position && pos.add_price != null && (
             <span className="bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 px-2 py-0.5 brut-border">
-              Add @ ${fmtPrice(pos.add_price)}
+              Add @ ${formatUsdPrice(pos.add_price)}
               {pos.add_time && ` (${fmtEntryTime(pos.add_time)})`}
             </span>
           )}
@@ -175,12 +172,12 @@ export const PositionCard: React.FC<PositionProps> = (pos) => {
         <div className="flex flex-wrap gap-2 items-center">
           {pos.lowest_price != null && (
             <span className="bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 px-2 py-0.5 brut-border">
-              Low: ${fmtPrice(pos.lowest_price)}
+              Low: ${formatUsdPrice(pos.lowest_price)}
             </span>
           )}
           {pos.highest_price != null && pos.highest_price > 0 && (
             <span className="bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-400 px-2 py-0.5 brut-border">
-              High: ${fmtPrice(pos.highest_price)}
+              High: ${formatUsdPrice(pos.highest_price)}
             </span>
           )}
         </div>

@@ -22,7 +22,6 @@ Moonshot monitors Binance USDT-M futures for **daily top gainers** (≥10% surge
 | Trailing Stop | 9% from low | Activates at 16% profit, trails 9% from lowest price |
 | Timeout | 11 days | Forced close after max hold period |
 | Add Position | 36% adverse | Equal-size add if price moves against by 36%; TP becomes 45% |
-| Dynamic SL | 多空比 | Optional: closes if long/short ratio drops ≥18% |
 
 ## Features
 

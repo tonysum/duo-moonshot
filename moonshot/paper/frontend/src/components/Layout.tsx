@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatUsdPrice } from '../formatUsdPrice';
 
 export type ScanSnapshot = {
   scan_time: string;
@@ -84,7 +85,7 @@ export const Layout: React.FC<LayoutProps> = ({
 }) => {
   const tickerContent = TICKER_SYMBOLS.map(({ key, label, icon }) => {
     const price = prices[key];
-    return `${icon} ${label}: $${price ? price.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '---'}`;
+    return `${icon} ${label}: $${price != null && Number.isFinite(price) ? formatUsdPrice(price) : '---'}`;
   }).join('     ·     ');
 
   const fh = feedHealth;
@@ -198,15 +199,19 @@ export const Layout: React.FC<LayoutProps> = ({
             ) : gainers.length === 0 ? (
               <span className="text-gray-500">Loading...</span>
             ) : (
-              gainers.map((g, i) => (
+              gainers.map((g, i) => {
+                const px = parseFloat(g.price);
+                const priceStr = formatUsdPrice(Number.isFinite(px) ? px : undefined);
+                return (
                 <div key={g.symbol} className="flex items-center gap-1.5 whitespace-nowrap shrink-0">
                   <span className="text-gray-500">#{i + 1}</span>
                   <span className="font-bold">{g.symbol.replace('USDT', '')}</span>
                   <span className="text-green-400 font-bold">+{g.pct_chg}%</span>
-                  <span className="text-gray-500">${(parseFloat(g.price) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}</span>
+                  <span className="text-gray-500">${priceStr}</span>
                   {i < gainers.length - 1 && <span className="text-gray-700 mx-0.5">|</span>}
                 </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>

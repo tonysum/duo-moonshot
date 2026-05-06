@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { fetchTrades } from '../api';
+import { formatUsdPrice } from '../formatUsdPrice';
 
 interface Trade {
   symbol: string;
@@ -84,7 +85,7 @@ export const TradesView: React.FC<TradesViewProps> = ({ strategy }) => {
               <tr key={i} className="border-b-4 border-black hover:bg-gray-50 transition-colors">
                 <td className="p-4 font-black border-r-4 border-black">{trade.symbol}</td>
                 <td className="p-4 border-r-4 border-black font-mono">
-                   {(trade.entry_price ?? 0).toFixed(4)} &rarr; {(trade.exit_price ?? 0).toFixed(4)}
+                   {formatUsdPrice(trade.entry_price)} &rarr; {formatUsdPrice(trade.exit_price)}
                 </td>
                 <td className="p-4 border-r-4 border-black">{trade.leverage ?? 1}x</td>
                 <td className="p-4 border-r-4 border-black">
