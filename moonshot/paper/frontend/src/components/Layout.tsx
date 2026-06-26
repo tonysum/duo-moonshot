@@ -17,8 +17,8 @@ export type FeedHealthSnapshot = {
 
 export interface LayoutProps {
   children: React.ReactNode;
-  activeView: 'dashboard' | 'trades' | 'summary';
-  onViewChange: (view: 'dashboard' | 'trades' | 'summary') => void;
+  activeView: 'dashboard' | 'trades' | 'summary' | 'equity';
+  onViewChange: (view: 'dashboard' | 'trades' | 'summary' | 'equity') => void;
   prices: Record<string, number>;
   wsConnected: boolean;
   darkMode: boolean;
@@ -141,17 +141,22 @@ export const Layout: React.FC<LayoutProps> = ({
         </div>
 
         <div className="flex gap-3 items-center">
-          {(['dashboard', 'trades', 'summary'] as const).map((view) => (
+          {([
+            { id: 'dashboard' as const, label: 'Dashboard' },
+            { id: 'trades' as const, label: 'Trades' },
+            { id: 'equity' as const, label: '📈 Equity' },
+            { id: 'summary' as const, label: '📊 Summary' },
+          ]).map(({ id, label }) => (
             <button
-              key={view}
-              onClick={() => onViewChange(view)}
+              key={id}
+              onClick={() => onViewChange(id)}
               className={`brut-border brut-shadow-hover px-4 py-2 font-bold uppercase text-sm ${
-                activeView === view
+                activeView === id
                   ? 'bg-accent text-white shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] translate-x-1 translate-y-1'
                   : 'bg-white dark:bg-gray-800 text-black dark:text-white brut-shadow'
               }`}
             >
-              {view === 'summary' ? '📊 Summary' : view.charAt(0).toUpperCase() + view.slice(1)}
+              {label}
             </button>
           ))}
           {/* Dark mode toggle */}

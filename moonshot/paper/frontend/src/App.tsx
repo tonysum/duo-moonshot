@@ -4,10 +4,11 @@ import { PositionCard } from './components/PositionCard';
 import { ControlPanel } from './components/ControlPanel';
 import { TradesView } from './components/TradesView';
 import { SummaryView } from './components/SummaryView';
+import { EquityCurveView } from './components/EquityCurveView';
 import { createStream, fetchLogs, fetchPendingSt, fetchTopGainers, fetchScanResults } from './api';
 
 function App() {
-  const [currentView, setCurrentView] = useState<'dashboard' | 'trades' | 'summary'>('dashboard');
+  const [currentView, setCurrentView] = useState<'dashboard' | 'trades' | 'summary' | 'equity'>('dashboard');
   const [activeStrategy, setActiveStrategy] = useState<'daily' | 'rolling'>('daily');
   const [mode, setMode] = useState<'single' | 'dual'>('single');
   const [status, setStatus] = useState<any>(null);
@@ -235,6 +236,8 @@ function App() {
             </div>
           ) : currentView === 'trades' ? (
             <TradesView strategy={mode === 'dual' ? activeStrategy : undefined} />
+          ) : currentView === 'equity' ? (
+            <EquityCurveView strategy={mode === 'dual' ? activeStrategy : undefined} />
           ) : (
             <SummaryView strategy={mode === 'dual' ? activeStrategy : undefined} />
           )}

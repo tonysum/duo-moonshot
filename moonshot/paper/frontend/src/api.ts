@@ -58,6 +58,17 @@ export async function fetchSummary(strategy?: 'daily' | 'rolling') {
   return res.json();
 }
 
+export type EquityPoint = {
+  timestamp: string;
+  total_equity: number;
+  cash: number;
+};
+
+export async function fetchEquity(): Promise<EquityPoint[]> {
+  const res = await fetch(`${API_BASE}/equity`);
+  return res.json();
+}
+
 /** 与回测 moonshot/rolling_runner export_csv 列一致的已平仓 CSV（UTF-8 BOM），表尾可选 Summary 段 */
 export async function downloadPaperTradesCsv(
   strategy?: 'daily' | 'rolling',
